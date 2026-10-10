@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>보호조치 쇼츠</title>
+<style>
+@font-face{font-family:P;font-weight:500;src:url(fonts/Pretendard-Medium.woff2)}
+@font-face{font-family:P;font-weight:700;src:url(fonts/Pretendard-Bold.woff2)}
+@font-face{font-family:P;font-weight:800;src:url(fonts/Pretendard-ExtraBold.woff2)}
+@font-face{font-family:P;font-weight:900;src:url(fonts/Pretendard-Black.woff2)}
+html,body{margin:0;background:#222}
+canvas{display:block;margin:0 auto;height:100vh;width:auto}
+</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+const W=1080,H=1920,FPS=30;
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const C={bg:'#F4EEE2',ink:'#1E2838',navy:'#2C4767',navy2:'#3E5C82',olive:'#5D6A30',oliveL:'#E9EBD6',
+  yellow:'#F6C945',yellowL:'#FBE7A1',card:'#FFFDF8',red:'#D2483F',muted:'#7B8392',line:'#DCD3C2',
+  skin:'#F3D3B8',skinS:'#E6BC9C',hair:'#3A2A21',paper:'#FFFFFF',box:'#C9A27A',boxD:'#A9825C',blue:'#2F5FA8'};
+
+/* ---------- utils ---------- */
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const P=(t,a,b)=>clamp((t-a)/(b-a));
+const eo=t=>1-Math.pow(1-t,3);
+const eio=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eb=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)};
+function font(w,s){ctx.font=`${w} ${s}px P`;}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);}
+function txt(s,x,y,{w=800,size=48,color=C.ink,align='left',ls=0,alpha=1,base='alphabetic'}={}){
+  ctx.save();ctx.globalAlpha*=alpha;font(w,size);ctx.fillStyle=color;ctx.textAlign=align;ctx.textBaseline=base;
+  ctx.letterSpacing=ls+'px';ctx.fillText(s,x,y);ctx.restore();}
+function tw(s,w,size,ls=0){ctx.save();font(w,size);ctx.letterSpacing=ls+'px';const m=ctx.measureText(s).width;ctx.restore();return m;}
+// fade+rise in
+function rise(p,dy=40){return {a:eo(p),y:(1-eo(p))*dy};}
+// highlighter bar behind text
+function hl(x,y,w,h,p,color=C.yellow){if(p<=0)return;ctx.save();ctx.fillStyle=color;ctx.globalAlpha=.9;
+  rr(x,y,w*eo(p),h,6);ctx.fill();ctx.restore();}
+function pop(p){return p<=0?0:eb(p);}
+function withT(x,y,s,a,fn){ctx.save();ctx.globalAlpha*=a;ctx.translate(x,y);ctx.scale(s,s);fn();ctx.restore();}
+function shadowCard(x,y,w,h,r=28,fill=C.card){ctx.save();ctx.shadowColor='rgba(30,40,56,.14)';ctx.shadowBlur=30;ctx.shadowOffsetY=12;
+  ctx.fillStyle=fill;rr(x,y,w,h,r);ctx.fill();ctx.restore();}
+function typed(s,p){return s.slice(0,Math.round(s.length*clamp(p)));}
+
+/* speech bubble: center x,y; lines; tail to (tx,ty) */
+function bubble(cx,cy,lines,p,{size=42,w=700,tail=[0,0],fill=C.paper,color=C.ink,think=false,weight=700,lh=1.42}={}){
+  if(p<=0)return;const s=pop(p);
+  font(weight,size);let mw=0;lines.forEach(l=>mw=Math.max(mw,ctx.measureText(l).width));
+  const bw=Math.min(w,mw+90),bh=lines.length*size*lh+60;
+  ctx.save();ctx.translate(cx,cy);ctx.scale(s,s);ctx.globalAlpha*=clamp(p*3);
+  ctx.shadowColor='rgba(30,40,56,.16)';ctx.shadowBlur=24;ctx.shadowOffsetY=10;
+  ctx.fillStyle=fill;ctx.strokeStyle=C.ink;ctx.lineWidth=4;
+  rr(-bw/2,-bh/2,bw,bh,bh>140?44:bh/2);ctx.fill();ctx.shadowColor='transparent';ctx.stroke();
+  // tail
+  const [tx,ty]=tail;
+  if(think){[[.85,16],[1.08,10]].forEach(([k,r])=>{ctx.beginPath();ctx.arc(tx*k,ty*k,r,0,7);ctx.fill();ctx.stroke();});}
+  else if(tx||ty){const ang=Math.atan2(ty,tx),bx=Math.cos(ang)*(bw/2-60)*.0, by=0;
+    const ex=clamp(tx,-bw/2+50,bw/2-50),ey=ty>0?bh/2-4:-bh/2+4;
+    ctx.beginPath();ctx.moveTo(ex-24,ey);ctx.lineTo(tx,ty);ctx.lineTo(ex+24,ey);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.moveTo(ex-24,ey);ctx.lineTo(tx,ty);ctx.lineTo(ex+24,ey);ctx.stroke();
+    ctx.fillRect(ex-22,ey-(ty>0?8:-2),44,6);}
+  ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';
+  lines.forEach((l,i)=>ctx.fillText(l,0,-bh/2+30+size*lh*(i+.5)));
+  ctx.restore();}
+
+/* simple flat character, head center at (x,y) */
+function person(x,y,s,o={}){
+  const {top=C.olive,hair='bob',mood='flat',look=0,glasses=false,tie=null,blink=false,shirt='#FFFCF2',cut=1e4}=o;
+  ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.beginPath();ctx.rect(-400,-400,800,400+cut);ctx.clip();
+  // back hair
+  ctx.fillStyle=C.hair;
+  if(hair==='bob'){ctx.beginPath();ctx.ellipse(0,8,92,96,0,0,7);ctx.fill();rr(-92,0,184,90,40);ctx.fill();}
+  // body
+  ctx.fillStyle=top;rr(-150,95,300,320,[120,120,30,30]);ctx.fill();
+  ctx.fillStyle=shirt;ctx.beginPath();ctx.moveTo(-48,95);ctx.lineTo(48,95);ctx.lineTo(0,215);ctx.closePath();ctx.fill();
+  if(tie){ctx.fillStyle=tie;ctx.beginPath();ctx.moveTo(-12,108);ctx.lineTo(12,108);ctx.lineTo(18,200);ctx.lineTo(0,222);ctx.lineTo(-18,200);ctx.closePath();ctx.fill();}
+  else{ // lanyard
+    ctx.strokeStyle=C.navy;ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(-40,100);ctx.lineTo(0,235);ctx.lineTo(40,100);ctx.stroke();
+    ctx.fillStyle='#fff';rr(-26,232,52,64,8);ctx.fill();ctx.strokeStyle=C.navy;ctx.lineWidth=4;ctx.stroke();}
+  // lapels
+  ctx.strokeStyle='rgba(0,0,0,.18)';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-50,98);ctx.lineTo(-8,230);ctx.moveTo(50,98);ctx.lineTo(8,230);ctx.stroke();
+  // neck
+  ctx.fillStyle=C.skinS;rr(-22,55,44,52,10);ctx.fill();
+  // head
+  ctx.fillStyle=C.skin;ctx.beginPath();ctx.ellipse(0,0,70,80,0,0,7);ctx.fill();
+  // ears
+  ctx.beginPath();ctx.ellipse(-70,8,12,18,0,0,7);ctx.ellipse(70,8,12,18,0,0,7);ctx.fill();
+  // front hair
+  ctx.fillStyle=C.hair;
+  if(hair==='bob'){ctx.beginPath();ctx.moveTo(-82,40);ctx.quadraticCurveTo(-95,-80,0,-88);ctx.quadraticCurveTo(95,-80,82,40);
+    ctx.quadraticCurveTo(70,-20,30,-40);ctx.quadraticCurveTo(-10,-20,-50,-30);ctx.quadraticCurveTo(-70,-10,-82,40);ctx.fill();}
+  else{ctx.beginPath();ctx.moveTo(-74,0);ctx.quadraticCurveTo(-82,-92,0,-92);ctx.quadraticCurveTo(84,-92,74,0);
+    ctx.quadraticCurveTo(66,-40,20,-44);ctx.quadraticCurveTo(-30,-30,-60,-40);ctx.quadraticCurveTo(-72,-24,-74,0);ctx.fill();}
+  // eyes
+  const ex=look*10;ctx.fillStyle=C.ink;
+  if(blink){ctx.fillRect(-36+ex,10,22,4);ctx.fillRect(14+ex,10,22,4);}
+  else{ctx.beginPath();ctx.ellipse(-25+ex,12,8,11,0,0,7);ctx.ellipse(25+ex,12,8,11,0,0,7);ctx.fill();}
+  // brows
+  ctx.strokeStyle=C.hair;ctx.lineWidth=6;ctx.lineCap='round';ctx.beginPath();
+  if(mood==='sad'||mood==='worry'){ctx.moveTo(-40,-14);ctx.lineTo(-14,-22);ctx.moveTo(40,-14);ctx.lineTo(14,-22);}
+  else{ctx.moveTo(-40,-16);ctx.lineTo(-12,-18);ctx.moveTo(40,-16);ctx.lineTo(12,-18);}
+  ctx.stroke();
+  // glasses
+  if(glasses){ctx.strokeStyle='#222';ctx.lineWidth=4;ctx.beginPath();ctx.roundRect(-48+ex,-4,40,32,9);ctx.roundRect(8+ex,-4,40,32,9);
+    ctx.moveTo(-8+ex,8);ctx.lineTo(8+ex,8);ctx.stroke();}
+  // mouth
+  ctx.strokeStyle='#8A4B3B';ctx.lineWidth=5;ctx.beginPath();
+  if(mood==='smile'){ctx.arc(0,36,16,.15*Math.PI,.85*Math.PI);}
+  else if(mood==='sad'){ctx.arc(0,56,13,1.2*Math.PI,1.8*Math.PI);}
+  else if(mood==='worry'){ctx.moveTo(-12,48);ctx.quadraticCurveTo(0,42,12,48);}
+  else{ctx.moveTo(-11,46);ctx.lineTo(11,46);}
+  ctx.stroke();
+  // cheeks
+  ctx.fillStyle='rgba(230,140,120,.25)';ctx.beginPath();ctx.ellipse(-44,34,12,7,0,0,7);ctx.ellipse(44,34,12,7,0,0,7);ctx.fill();
+  ctx.restore();}
+
+function tag(x,y,label,p,bg=C.navy,fg='#fff'){if(p<=0)return;const a=eo(p);font(800,40);const w=ctx.measureText(label).width+56;
+  ctx.save();ctx.globalAlpha*=a;ctx.translate(x-(1-a)*60,y);ctx.fillStyle=bg;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(w,0);ctx.lineTo(w-14,70);ctx.lineTo(0,70);ctx.closePath();ctx.fill();
+  ctx.fillStyle=fg;ctx.textBaseline='middle';ctx.fillText(label,26,37);ctx.restore();}
+
+function headline(lines,t,t0,{y=330,size=86,hlc=C.yellow,step=.22,center=true}={}){
+  lines.forEach((l,i)=>{const p=P(t,t0+i*step,t0+i*step+.45);if(p<=0)return;const r=rise(p,50);
+    const w=tw(l,900,size,-2),x=center?W/2:90;const lx=center?x-w/2:x;
+    hl(lx-14,y+i*size*1.25-size*.38+r.y,w+28,size*.48,P(t,t0+i*step+.25,t0+i*step+.7),hlc);
+    txt(l,x,y+i*size*1.25+r.y,{w:900,size,align:center?'center':'left',ls:-2,alpha:r.a});});}
+
+function checkMark(x,y,s,p,color=C.olive){if(p<=0)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=10*s;ctx.lineCap='round';ctx.lineJoin='round';
+  const pts=[[x-22*s,y],[x-6*s,y+16*s],[x+24*s,y-18*s]];const L1=Math.hypot(16,16),L2=Math.hypot(30,34),tot=L1+L2;const d=eo(p)*tot;
+  ctx.beginPath();ctx.moveTo(...pts[0]);if(d<=L1){const k=d/L1;ctx.lineTo(lerp(pts[0][0],pts[1][0],k),lerp(pts[0][1],pts[1][1],k));}
+  else{ctx.lineTo(...pts[1]);const k=(d-L1)/L2;ctx.lineTo(lerp(pts[1][0],pts[2][0],k),lerp(pts[1][1],pts[2][1],k));}ctx.stroke();ctx.restore();}
+
+/* ---------- background ---------- */
+function bg(t){ctx.fillStyle=C.bg;ctx.fillRect(0,0,W,H);
+  // paper dots
+  ctx.fillStyle='rgba(30,40,56,.05)';for(let y=40;y<H;y+=60)for(let x=40;x<W;x+=60){ctx.beginPath();ctx.arc(x,y,2.4,0,7);ctx.fill();}
+  // brand header
+  txt('상생의 노동법',W/2,140,{w:800,size:30,color:C.muted,align:'center',ls:2});}
+
+/* ---------- scenes ---------- */
+const S=[];
+// 1. Hook
+S.push({d:6,f(t){
+  headline(['보호하려고 옮겼는데,','왜 저만 떠나야 하죠?'],t,.15,{y:330});
+  // floor/desk
+  const pr=P(t,.3,1.1);const r=rise(pr,80);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  // window back
+  ctx.fillStyle='#DCE5EE';rr(110,620,860,560,30);ctx.fill();
+  ctx.strokeStyle='#C3D0DD';ctx.lineWidth=6;for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(110+i*215,620);ctx.lineTo(110+i*215,1180);ctx.stroke();}
+  ctx.fillStyle='#B8C6D6';[[150,980,90,200],[260,900,110,280],[400,1010,80,170],[700,940,120,240],[840,1000,90,180]].forEach(b=>{rr(...b,4);ctx.fill();});
+  // plant
+  ctx.fillStyle='#6E8B4E';for(let i=0;i<5;i++){ctx.save();ctx.translate(200,1210);ctx.rotate(-.9+i*.45);ctx.beginPath();ctx.ellipse(0,-70,22,70,0,0,7);ctx.fill();ctx.restore();}
+  // person
+  const bl=(t%3.1)>3.0;
+  person(540,1060-Math.sin(t*2)*3,1.25,{mood:t>3?'sad':'worry',look:t<2.6?.8:-.2,blink:bl,cut:200});
+  // desk
+  ctx.fillStyle='#CDB89A';rr(60,1300,960,50,10);ctx.fill();ctx.fillStyle='#B39D7E';ctx.fillRect(60,1340,960,14);ctx.fillStyle='#E4D6C0';ctx.fillRect(100,1354,880,260);
+  ctx.restore();
+  // box rising (packing)
+  const pb=P(t,.9,1.6);if(pb>0){const by=lerp(1500,1210,eb(pb));
+    ctx.fillStyle=C.box;rr(330,by,420,170,8);ctx.fill();ctx.fillStyle=C.boxD;ctx.fillRect(330,by,420,26);
+    ctx.fillStyle=C.navy;rr(380,by-70,60,90,4);ctx.fill();ctx.fillStyle='#E8DCC8';rr(450,by-50,110,70,4);ctx.fill();
+    ctx.fillStyle='#6E8B4E';ctx.beginPath();ctx.ellipse(640,by-40,40,30,0,0,7);ctx.fill();
+    ctx.fillStyle=C.boxD;ctx.globalAlpha=.6;rr(500,by+70,80,14,7);ctx.fill();ctx.globalAlpha=1;}
+  bubble(760,610,['조사하는 동안','다른 층에서 근무하시죠.'],P(t,1.4,1.9),{size:40,tail:[-180,110]});
+  bubble(400,1490,['저는 여기서','계속 일하고 싶은데요.'],P(t,3.0,3.5),{size:44,tail:[90,-120]});
+  txt('매뉴얼의 기준을 설명하기 위한 가상 사례입니다.',W/2,1660,{w:500,size:28,color:C.muted,align:'center',alpha:P(t,1,1.6)});
+}});
+// 2. Email
+S.push({d:6,f(t){
+  tag(90,250,'몇 시간 전',P(t,.1,.5));
+  const p=P(t,.2,.8),r=rise(p,80);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  shadowCard(90,420,900,720,30);
+  ctx.fillStyle='#EEF1F5';rr(90,420,900,80,[30,30,0,0]);ctx.fill();
+  ['#E86A5E','#F2BC4B','#6CBE6A'].forEach((c,i)=>{ctx.fillStyle=c;ctx.beginPath();ctx.arc(140+i*40,460,12,0,7);ctx.fill();});
+  // sidebar
+  ctx.fillStyle='#F6F7F9';ctx.fillRect(90,500,230,640);
+  ['받은메일함','중요메일','보낸메일함','임시보관함'].forEach((s,i)=>{if(i===0){ctx.fillStyle='#DDE6F2';rr(104,530,202,64,12);ctx.fill();}
+    txt(s,128,573+i*84,{w:700,size:30,color:i===0?C.navy:C.muted});});
+  // content
+  txt('제목',360,590,{w:800,size:34,color:C.muted});
+  txt(typed('직장 내 괴롭힘 상담 요청',P(t,.9,2.0)),360,650,{w:900,size:46});
+  ctx.fillStyle=C.line;ctx.fillRect(360,690,590,3);
+  txt(typed('조사와 보호조치를',P(t,2.0,2.7)),360,780,{w:700,size:42});
+  txt(typed('요청드립니다.',P(t,2.7,3.1)),360,845,{w:700,size:42});
+  if(Math.floor(t*2)%2===0&&t<3.3&&t>.9){}
+  // send button
+  const sp=P(t,3.4,3.7);ctx.save();const bs=1-.08*Math.sin(sp*Math.PI);ctx.translate(800,1040);ctx.scale(bs,bs);
+  ctx.fillStyle=C.navy;rr(-110,-42,220,84,42);ctx.fill();txt('보내기',0,14,{w:800,size:36,color:'#fff',align:'center'});ctx.restore();
+  ctx.restore();
+  // envelope flies
+  const fp=P(t,3.7,4.6);if(fp>0&&fp<1){const ex=lerp(800,1000,eio(fp)),ey=lerp(1040,260,eio(fp));
+    withT(ex,ey,1-.3*fp,1-fp*.6,()=>{ctx.fillStyle='#fff';ctx.strokeStyle=C.navy;ctx.lineWidth=5;rr(-60,-40,120,80,8);ctx.fill();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-60,-40);ctx.lineTo(0,8);ctx.lineTo(60,-40);ctx.stroke();});}
+  // stamp
+  const st=P(t,4.4,4.8);if(st>0){withT(540,1340,lerp(1.6,1,eo(st)),eo(st),()=>{ctx.rotate(-.06);ctx.strokeStyle=C.red;ctx.lineWidth=8;rr(-250,-70,500,140,18);ctx.stroke();
+    txt('조사·보호조치 요청',0,18,{w:900,size:52,color:C.red,align:'center'});});}
+}});
+// 3. HR + floor
+S.push({d:6.5,f(t){
+  tag(90,250,'조사 담당자 확인',P(t,.1,.5),C.yellow,C.ink);
+  const p=P(t,.2,.8),r=rise(p,60);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  person(250,560,.95,{top:C.navy,mood:'flat',look:.6,blink:(t%2.7)>2.6,cut:262});
+  ctx.fillStyle='#CDB89A';rr(60,810,480,40,10);ctx.fill();
+  ctx.restore();
+  bubble(720,560,['조사는 바로 준비하고,','우선 마주치지 않게','해야겠네요.'],P(t,.7,1.2),{size:40,tail:[-230,40]});
+  // building floors
+  const fl=['5F','4F','3F','2F'];const bx=150,by=950,fw=780,fh=150;
+  fl.forEach((f,i)=>{const pp=P(t,1.4+i*.12,1.9+i*.12);if(pp<=0)return;const rr_=rise(pp,40);
+    ctx.save();ctx.globalAlpha=rr_.a;ctx.translate(0,rr_.y);
+    const hi=(i===1&&t>3.6);
+    ctx.fillStyle=hi?C.yellowL:C.card;ctx.strokeStyle=C.line;ctx.lineWidth=4;rr(bx+120,by+i*(fh+16),fw-120,fh,16);ctx.fill();ctx.stroke();
+    ctx.fillStyle=i===1&&t>3.6?C.navy:'#C9D2DE';rr(bx,by+i*(fh+16),100,fh,16);ctx.fill();
+    txt(f,bx+50,by+i*(fh+16)+fh/2+16,{w:900,size:44,color:i===1&&t>3.6?'#fff':C.navy,align:'center'});
+    // desks
+    for(let k=0;k<5;k++){ctx.fillStyle='#E3DACA';rr(bx+160+k*120,by+i*(fh+16)+40,90,60,8);ctx.fill();}
+    ctx.restore();});
+  // dot moves 5F -> 4F
+  if(t>2.2){const mp=P(t,2.6,3.6);const y0=by+fh/2,y1=by+fh+16+fh/2;const x0=bx+205,x1=bx+685;
+    const x=lerp(x0,x1,eio(mp)),y=lerp(y0,y1,eio(mp))-Math.sin(mp*Math.PI)*60;
+    if(mp>0){ctx.save();ctx.setLineDash([12,12]);ctx.strokeStyle=C.olive;ctx.lineWidth=5;ctx.beginPath();
+      for(let k=0;k<=20;k++){const q=k/20*eio(mp);const xx=lerp(x0,x1,q),yy=lerp(y0,y1,q)-Math.sin(q*Math.PI)*60;k?ctx.lineTo(xx,yy):ctx.moveTo(xx,yy);}ctx.stroke();ctx.restore();}
+    const s=pop(P(t,2.2,2.6));ctx.fillStyle=C.olive;ctx.beginPath();ctx.arc(x,y,30*s,0,7);ctx.fill();ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(x,y-6*s,12*s,0,7);ctx.fill();}
+  const lp=P(t,3.6,4.0);if(lp>0){withT(bx+690,by+fh+16-40,pop(lp),1,()=>{ctx.fillStyle=C.ink;rr(-160,-50,320,64,32);ctx.fill();
+    txt('다른 층 임시 근무지',0,-6,{w:800,size:30,color:'#fff',align:'center'});});}
+}});
+// 4. Checklist blank
+S.push({d:7,f(t){
+  const p=P(t,.1,.7),r=rise(p,80);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  ctx.fillStyle='#6C5A45';rr(110,300,860,920,30);ctx.fill();
+  shadowCard(150,360,780,830,16,C.paper);
+  ctx.fillStyle='#9AA3AE';rr(420,280,240,90,16);ctx.fill();ctx.fillStyle='#C4CAD2';rr(450,300,180,50,10);ctx.fill();
+  txt('보호조치 검토표',540,500,{w:900,size:62,align:'center',ls:-1});
+  ctx.fillStyle=C.ink;ctx.fillRect(220,560,640,4);
+  // row1
+  txt('임시 근무장소',220,690,{w:700,size:40,color:C.muted});
+  txt(typed('다른 층',P(t,.8,1.3)),560,690,{w:900,size:48});
+  checkMark(830,672,1.2,P(t,1.3,1.7));
+  ctx.fillStyle=C.line;ctx.fillRect(220,740,640,3);
+  // row2
+  txt('당사자 의사',220,880,{w:700,size:40,color:C.muted});
+  ctx.fillStyle=C.ink;ctx.fillRect(560,895,240,5);
+  if(t>1.8&&Math.floor(t*2.5)%2===0){ctx.fillStyle=C.navy;ctx.fillRect(562,830,6,58);}
+  ctx.fillStyle=C.line;ctx.fillRect(220,940,640,3);
+  // question mark pop
+  const q=P(t,2.2,2.6);if(q>0)withT(830,860,pop(q),1,()=>{ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(0,0,46,0,7);ctx.fill();txt('?',0,22,{w:900,size:64,color:'#fff',align:'center'});});
+  // stopwatch note
+  ctx.restore();
+  // caption
+  [['빠르게 정한 것은 ','장소','였습니다.',3.0],['아직 묻지 않은 것은 ','당사자의 의사','였습니다.',4.2]].forEach(([a,b,c,t0],i)=>{
+    const pp=P(t,t0,t0+.5);if(pp<=0)return;const rr_=rise(pp,30);const size=50;
+    const wa=tw(a,800,size),wb=tw(b,900,size),wc=tw(c,800,size),tot=wa+wb+wc;let x=W/2-tot/2;const y=1370+i*100+rr_.y;
+    hl(x+wa-8,y-size*.45,wb+16,size*.55,P(t,t0+.3,t0+.8),i?C.yellow:'#D7DEE8');
+    txt(a,x,y,{w:800,size,alpha:rr_.a});txt(b,x+wa,y,{w:900,size,alpha:rr_.a,color:i?C.red:C.navy});txt(c,x+wa+wb,y,{w:800,size,alpha:rr_.a});});
+}});
+// 5. Does moving solve it?
+S.push({d:8,f(t){
+  headline(['자리를 옮기면,','해결될까요?'],t,.1,{y:300,size:80});
+  // calendar
+  const p=P(t,.5,1.1),r=rise(p,60);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  shadowCard(90,470,560,380,22);ctx.fillStyle=C.navy;rr(90,470,560,70,[22,22,0,0]);ctx.fill();
+  txt('4월',370,520,{w:900,size:38,color:'#fff',align:'center'});
+  ['일','월','화','수','목','금','토'].forEach((d,i)=>txt(d,135+i*78,590,{w:700,size:28,color:C.muted,align:'center'}));
+  for(let k=0;k<14;k++){const d=13+k;if(d>26)break;const col=k%7,row=Math.floor(k/7);
+    txt(String(d),135+col*78,650+row*80,{w:700,size:32,align:'center',color:d===23?C.red:C.ink});}
+  const cp=P(t,1.2,1.9);if(cp>0){ctx.strokeStyle=C.red;ctx.lineWidth=6;ctx.beginPath();ctx.ellipse(135+3*78,720,38,32,-.2,-1.6,-1.6+Math.PI*2*eo(cp));ctx.stroke();
+    txt('프로젝트 발표',135+3*78,800,{w:900,size:30,color:C.red,align:'center',alpha:eo(cp)});}
+  ctx.restore();
+  bubble(850,610,['다음 주 발표는','제가 맡았는데…'],P(t,1.6,2.1),{size:36,think:true,tail:[-200,120]});
+  // quote
+  const qp=P(t,2.5,3.0),qr=rise(qp,40);
+  ctx.save();ctx.globalAlpha=qr.a;person(170,1020+qr.y,.6,{mood:'worry',look:.8,blink:(t%3)>2.9,cut:170});ctx.restore();
+  bubble(620,1010,['마주치는 건 줄이고 싶어요.','하지만 맡은 일은 계속하고 싶습니다.'],qp,{size:38,w:820,tail:[-330,30]});
+  // two cards
+  [[C.navy,'피하고 싶은 것','마주치는 상황',4.0,90],[C.olive,'계속하고 싶은 것','맡은 업무·발표',4.5,560]].forEach(([c,h,b,t0,x])=>{
+    const pp=P(t,t0,t0+.5);if(pp<=0)return;const s=pop(pp);
+    withT(x+215,1310,s,1,()=>{shadowCard(-215,-120,430,240,24);ctx.fillStyle=c;rr(-215,-120,430,80,[24,24,0,0]);ctx.fill();
+      txt(h,0,-66,{w:800,size:36,color:'#fff',align:'center'});txt(b,0,60,{w:900,size:44,align:'center',color:c});});});
+  // caption
+  const cp2=P(t,5.4,5.9),cr=rise(cp2,30);
+  txt('무엇을 피하고 싶은지,',W/2,1560+cr.y,{w:800,size:44,align:'center',alpha:cr.a});
+  hl(W/2-330,1630-26+cr.y,660,30,P(t,5.8,6.4));
+  txt('무엇을 계속하고 싶은지 함께 확인합니다.',W/2,1630+cr.y,{w:900,size:44,align:'center',alpha:cr.a});
+}});
+// 6. Law
+S.push({d:11,f(t){
+  headline(['조사 중과 확인 후,','보호조치의 기준을 구분합니다.'],t,.1,{y:290,size:66,step:.18});
+  const blocks=[
+    {y:470,c:C.navy,title:'조사 중',icon:'search',items:['피해를 입었거나 피해를 주장하는 근로자','보호를 위해 필요한 경우 적절한 조치','당사자의 의사에 반하는 조치 금지'],t0:.8,key:2},
+    {y:1010,c:C.olive,title:'괴롭힘 확인 후',icon:'doc',items:['피해근로자','피해근로자가 요청하면 적절한 조치','요청 취지와 사업장 여건을 고려'],t0:4.8,key:1}];
+  blocks.forEach(b=>{const p=P(t,b.t0,b.t0+.5);if(p<=0)return;const r=rise(p,60);
+    ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    shadowCard(70,b.y,940,500,26);ctx.fillStyle=b.c;rr(70,b.y,940,100,[26,26,0,0]);ctx.fill();
+    // icon
+    ctx.save();ctx.translate(130,b.y+50);ctx.strokeStyle='#fff';ctx.fillStyle='#fff';ctx.lineWidth=7;
+    if(b.icon==='search'){ctx.beginPath();ctx.arc(-4,-4,18,0,7);ctx.stroke();ctx.beginPath();ctx.moveTo(10,10);ctx.lineTo(24,24);ctx.stroke();}
+    else{ctx.lineWidth=5;rr(-18,-24,36,48,5);ctx.stroke();ctx.beginPath();ctx.moveTo(-9,-8);ctx.lineTo(9,-8);ctx.moveTo(-9,4);ctx.lineTo(9,4);ctx.stroke();}
+    ctx.restore();
+    txt(b.title,180,b.y+66,{w:900,size:48,color:'#fff'});
+    b.items.forEach((it,i)=>{const ip=P(t,b.t0+.6+i*.9,b.t0+1.1+i*.9);if(ip<=0)return;const ir=rise(ip,24);const yy=b.y+190+i*112+ir.y;
+      const key=i===b.key;
+      if(key){hl(130,yy-46,860,84,P(t,b.t0+1.0+i*.9,b.t0+1.6+i*.9),b===blocks[0]?C.yellowL:C.oliveL);}
+      ctx.globalAlpha=r.a*ir.a;ctx.fillStyle=b.c;ctx.beginPath();ctx.arc(150,yy-4,28,0,7);ctx.fill();
+      txt(String(i+1),150,yy+9,{w:900,size:34,color:'#fff',align:'center'});
+      txt(it,200,yy+12,{w:key?900:700,size:39,color:key&&b===blocks[0]?C.red:C.ink,ls:-.5});ctx.globalAlpha=r.a;});
+    ctx.restore();});
+  txt('근로기준법 제76조의3 제3·4·6항 · 고용노동부 매뉴얼 12~13쪽',W/2,1590,{w:500,size:26,color:C.muted,align:'center',alpha:P(t,1,1.5)});
+}});
+// 7. Methods + prohibition
+S.push({d:6,f(t){
+  const p=P(t,.1,.6),r=rise(p,60);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  shadowCard(70,420,940,420,28,'#E6ECF3');
+  ctx.save();ctx.translate(540,560);ctx.rotate(t*1.2);ctx.fillStyle=C.navy2;
+  for(let i=0;i<8;i++){ctx.save();ctx.rotate(i*Math.PI/4);rr(-16,-78,32,36,6);ctx.fill();ctx.restore();}
+  ctx.beginPath();ctx.arc(0,0,60,0,7);ctx.fill();ctx.fillStyle='#E6ECF3';ctx.beginPath();ctx.arc(0,0,24,0,7);ctx.fill();ctx.restore();
+  txt('근무장소 변경·유급휴가 등',540,730,{w:900,size:50,align:'center',color:C.navy});
+  txt('상황에 맞는 보호 방법을 검토합니다.',540,795,{w:700,size:40,align:'center'});
+  ctx.restore();
+  const wp=P(t,1.8,2.3);if(wp>0){const sh=Math.sin(P(t,2.3,2.9)*Math.PI*6)*8*(1-P(t,2.3,2.9));
+    withT(540+sh,1200,pop(wp),1,()=>{ctx.fillStyle=C.yellow;rr(-470,-260,940,520,30);ctx.fill();
+      ctx.fillStyle=C.ink;ctx.beginPath();ctx.moveTo(0,-200);ctx.lineTo(80,-60);ctx.lineTo(-80,-60);ctx.closePath();ctx.lineJoin='round';ctx.lineWidth=16;ctx.strokeStyle=C.ink;ctx.stroke();ctx.fill();
+      txt('!',0,-78,{w:900,size:80,color:C.yellow,align:'center'});
+      txt('신고자와 피해근로자등에 대한',0,40,{w:800,size:46,align:'center'});
+      txt('해고 등 불리한 처우는',0,125,{w:900,size:60,align:'center'});
+      txt('금지됩니다.',0,205,{w:900,size:60,align:'center',color:C.red});});}
+  txt('근로기준법 제76조의3 제6항',W/2,1560,{w:500,size:26,color:C.muted,align:'center',alpha:P(t,2.5,3)});
+}});
+// 8. Ask & adjust
+S.push({d:9,f(t){
+  headline(['어떤 상황이','가장 걱정되시나요?'],t,.1,{y:300,size:80});
+  const p=P(t,.6,1.1),r=rise(p,60);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  person(230,560,.62,{top:C.navy,mood:'smile',look:.6,blink:(t%2.9)>2.8,cut:258});
+  person(850,560,.62,{mood:'worry',look:-.6,blink:(t%3.3)>3.2,cut:258});
+  ctx.fillStyle='#CDB89A';rr(70,720,940,34,10);ctx.fill();
+  ctx.restore();
+  bubble(620,830,['둘이 참석하는 회의가 부담스럽습니다.','업무는 계속 맡고 싶어요.'],P(t,1.2,1.7),{size:36,w:900,tail:[230,-80]});
+  bubble(460,1010,['자리 이동은 보류하겠습니다.','회의 운영부터 조정할 수 있는지 확인하죠.'],P(t,2.6,3.1),{size:36,w:900,tail:[-230,-80],fill:'#E6ECF3'});
+  // memo
+  const mp=P(t,4.0,4.5),mr=rise(mp,60);if(mp>0){ctx.save();ctx.globalAlpha=mr.a;ctx.translate(0,mr.y);
+    shadowCard(70,1130,940,430,24,C.paper);txt('보호조치 검토 메모',540,1210,{w:900,size:46,align:'center'});
+    [['당사자 의사','현 자리·담당 업무 유지 희망'],['보호 방안','회의 주재자·참석 방식 조정 검토'],['후속 확인','접촉 상황과 업무상 어려움 점검']].forEach(([a,b],i)=>{
+      const ip=P(t,4.5+i*.6,4.9+i*.6);const y=1280+i*90;ctx.globalAlpha=mr.a*eo(ip);
+      ctx.fillStyle='#E6ECF3';rr(110,y-8,230,72,10);ctx.fill();txt(a,225,y+40,{w:800,size:32,align:'center',color:C.navy});
+      txt(b,370,y+40,{w:700,size:34});});ctx.restore();}
+  const cp=P(t,6.6,7.1),cr=rise(cp,30);
+  txt('객관적 조사는 계속하고,',W/2,1650+cr.y,{w:700,size:40,align:'center',alpha:cr.a});
+  txt('보호조치도 실제 효과를 확인합니다.',W/2,1708+cr.y,{w:900,size:40,align:'center',alpha:cr.a});
+}});
+// 9. Lawyer conclusion
+S.push({d:7,f(t){
+  headline(['보호조치의 출발점은','당사자에게 묻는 것입니다.'],t,.1,{y:300,size:72});
+  const p=P(t,.6,1.2),r=rise(p,80);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  ctx.fillStyle='#E3EAF1';ctx.beginPath();ctx.arc(540,1240,340,0,7);ctx.fill();
+  person(540,1080,1.15,{top:C.navy,hair:'short',glasses:true,tie:C.blue,mood:'smile',shirt:'#fff',blink:(t%3.4)>3.3,cut:300});
+  ctx.fillStyle='#CDB89A';rr(60,1420,960,50,10);ctx.fill();
+  // nameplate
+  ctx.fillStyle=C.navy;ctx.beginPath();ctx.moveTo(620,1430);ctx.lineTo(960,1430);ctx.lineTo(980,1350);ctx.lineTo(600,1350);ctx.closePath();ctx.fill();
+  txt('박재우 변호사',790,1405,{w:800,size:38,color:'#fff',align:'center'});
+  ctx.restore();
+  bubble(540,600,['“어떤 조치가 안전하게 일하는 데','도움이 되는지,','먼저 당사자의 의사를 확인하십시오.”'],P(t,1.6,2.2),{size:40,w:920,tail:[-60,190]});
+}});
+// 10. Checklist + source
+S.push({d:7,f(t){
+  tag(90,230,'실무 체크',P(t,.1,.5));
+  const q=['어떤 접촉과 상황이 우려되는가?','제안한 조치가 당사자 의사에 반하지 않는가?','업무와 근무 여건에 어떤 영향이 있는가?','시행 후에도 보호 효과를 확인하고 있는가?'];
+  q.forEach((s,i)=>{const p=P(t,.4+i*.6,.9+i*.6);if(p<=0)return;const r=rise(p,30);const y=400+i*150+r.y;
+    ctx.save();ctx.globalAlpha=r.a;shadowCard(70,y,940,120,20);
+    ctx.strokeStyle=C.navy;ctx.lineWidth=5;rr(110,y+33,54,54,10);ctx.stroke();checkMark(137,y+60,1,P(t,.8+i*.6,1.2+i*.6));
+    txt(s,190,y+76,{w:800,size:37,ls:-.5});ctx.restore();});
+  txt('구체적인 보호 방법은 사안과 사업장 여건에 따라 달라집니다.',W/2,1060,{w:600,size:30,color:C.muted,align:'center',alpha:P(t,3,3.5)});
+  const sp=P(t,3.4,3.9),sr=rise(sp,40);ctx.save();ctx.globalAlpha=sr.a;ctx.translate(0,sr.y);
+  ctx.fillStyle='#E6ECF3';rr(70,1130,940,300,24);ctx.fill();
+  txt('출처',120,1200,{w:900,size:36,color:C.navy});
+  txt('고용노동부 「직장 내 괴롭힘 예방·대응 매뉴얼」',120,1265,{w:700,size:32});
+  txt('2026.7월판, 12·13·75·86쪽',120,1315,{w:700,size:32});
+  txt('근로기준법 제76조의3',120,1365,{w:700,size:32});ctx.restore();
+  const bp=P(t,4.4,5.0);if(bp>0)withT(540,1530,pop(bp),1,()=>{ctx.fillStyle=C.navy;rr(-380,-60,760,120,60);ctx.fill();
+    txt('상생의 노동법  |  박재우 변호사',0,14,{w:800,size:40,color:'#fff',align:'center'});});
+}});
+
+/* ---------- timeline ---------- */
+let acc=0;S.forEach(s=>{s.s=acc;acc+=s.d;});const TOTAL=acc;
+const TR=.35;
+function renderFrame(T){
+  // find scene
+  let i=S.findIndex(s=>T>=s.s&&T<s.s+s.d);if(i<0)i=S.length-1;const sc=S[i];
+  bg(T);ctx.save();sc.f(T-sc.s);ctx.restore();
+  // progress bar
+  ctx.fillStyle='rgba(30,40,56,.12)';ctx.fillRect(0,0,W,10);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*T/TOTAL,10);
+  // wipe transition
+  const next=sc.s+sc.d;let k=-1;
+  if(i<S.length-1&&T>next-TR)k=1-(next-T)/TR;           // covering
+  else if(i>0&&T<sc.s+TR)k=1+(T-sc.s)/TR;                 // uncovering
+  if(k>=0){ctx.save();ctx.fillStyle=C.navy;
+    if(k<=1){const h=H*eio(k);ctx.fillRect(0,H-h,W,h);}else{const h=H*(1-eio(k-1));ctx.fillRect(0,0,W,h);}
+    ctx.restore();}
+  // fade in/out whole video
+  const fo=Math.max(1-P(T,0,.4),P(T,TOTAL-.6,TOTAL));if(fo>0){ctx.fillStyle=`rgba(0,0,0,${fo})`;ctx.fillRect(0,0,W,H);}
+}
+window.renderFrame=renderFrame;window.TOTAL=TOTAL;window.FPS=FPS;
+window.ready=Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다'))).then(()=>document.fonts.ready);
+if(!location.search.includes('render')){window.ready.then(()=>{const st=performance.now();(function loop(){renderFrame(((performance.now()-st)/1000)%TOTAL);requestAnimationFrame(loop);})();});}
+</script></body></html>
