@@ -151,7 +151,7 @@ S.push({d:6,f(t){
   ctx.fillStyle='#6E8B4E';for(let i=0;i<5;i++){ctx.save();ctx.translate(200,1210);ctx.rotate(-.9+i*.45);ctx.beginPath();ctx.ellipse(0,-70,22,70,0,0,7);ctx.fill();ctx.restore();}
   // person
   const bl=(t%3.1)>3.0;
-  person(540,1060-Math.sin(t*2)*3,1.25,{mood:t>3?'sad':'worry',look:t<2.6?.8:-.2,blink:bl,cut:200});
+  person(540,1060-Math.sin(t*2)*3,1.25,{mood:t>2.3?'sad':'worry',look:t<2.0?.8:-.2,blink:bl,cut:200});
   // desk
   ctx.fillStyle='#CDB89A';rr(60,1300,960,50,10);ctx.fill();ctx.fillStyle='#B39D7E';ctx.fillRect(60,1340,960,14);ctx.fillStyle='#E4D6C0';ctx.fillRect(100,1354,880,260);
   ctx.restore();
@@ -161,8 +161,8 @@ S.push({d:6,f(t){
     ctx.fillStyle=C.navy;rr(380,by-70,60,90,4);ctx.fill();ctx.fillStyle='#E8DCC8';rr(450,by-50,110,70,4);ctx.fill();
     ctx.fillStyle='#6E8B4E';ctx.beginPath();ctx.ellipse(640,by-40,40,30,0,0,7);ctx.fill();
     ctx.fillStyle=C.boxD;ctx.globalAlpha=.6;rr(500,by+70,80,14,7);ctx.fill();ctx.globalAlpha=1;}
-  bubble(760,610,['조사하는 동안','다른 층에서 근무하시죠.'],P(t,1.4,1.9),{size:40,tail:[-180,110]});
-  bubble(400,1490,['저는 여기서','계속 일하고 싶은데요.'],P(t,3.0,3.5),{size:44,tail:[90,-120]});
+  bubble(760,610,['조사하는 동안','다른 층에서 근무하시죠.'],P(t,1.0,1.5),{size:40,tail:[-180,110]});
+  bubble(400,1490,['저는 여기서','계속 일하고 싶은데요.'],P(t,2.3,2.8),{size:44,tail:[90,-120]});
   txt('매뉴얼의 기준을 설명하기 위한 가상 사례입니다.',W/2,1660,{w:500,size:28,color:C.muted,align:'center',alpha:P(t,1,1.6)});
 }});
 // 2. Email
@@ -249,7 +249,7 @@ S.push({d:7,f(t){
   // stopwatch note
   ctx.restore();
   // caption
-  [['빠르게 정한 것은 ','장소','였습니다.',3.0],['아직 묻지 않은 것은 ','당사자의 의사','였습니다.',4.2]].forEach(([a,b,c,t0],i)=>{
+  [['빠르게 정한 것은 ','장소','였습니다.',1.6],['아직 묻지 않은 것은 ','당사자의 의사','였습니다.',4.0]].forEach(([a,b,c,t0],i)=>{
     const pp=P(t,t0,t0+.5);if(pp<=0)return;const rr_=rise(pp,30);const size=50;
     const wa=tw(a,800,size),wb=tw(b,900,size),wc=tw(c,800,size),tot=wa+wb+wc;let x=W/2-tot/2;const y=1370+i*100+rr_.y;
     hl(x+wa-8,y-size*.45,wb+16,size*.55,P(t,t0+.3,t0+.8),i?C.yellow:'#D7DEE8');
@@ -380,17 +380,21 @@ S.push({d:7,f(t){
   txt('고용노동부 「직장 내 괴롭힘 예방·대응 매뉴얼」',120,1265,{w:700,size:32});
   txt('2026.7월판, 12·13·75·86쪽',120,1315,{w:700,size:32});
   txt('근로기준법 제76조의3',120,1365,{w:700,size:32});ctx.restore();
-  const bp=P(t,4.4,5.0);if(bp>0)withT(540,1530,pop(bp),1,()=>{ctx.fillStyle=C.navy;rr(-380,-60,760,120,60);ctx.fill();
+  const bp=P(t,.4,1.0);if(bp>0)withT(540,1530,pop(bp),1,()=>{ctx.fillStyle=C.navy;rr(-380,-60,760,120,60);ctx.fill();
     txt('상생의 노동법  |  박재우 변호사',0,14,{w:800,size:40,color:'#fff',align:'center'});});
 }});
 
 /* ---------- timeline ---------- */
-let acc=0;S.forEach(s=>{s.s=acc;acc+=s.d;});const TOTAL=acc;
+// narration-synced timing: [scene duration, narration start offset]
+const TIMING=[[4.8,.25],[6.6,.25],[6.2,.25],[7.0,1.5],[12.4,.25],[15.3,.25],[8.8,.25],[12.1,.25],[9.05,.25],[6.0,.5]];
+S.forEach((s,i)=>{const [d,lead]=TIMING[i];s.k=Math.max(1,d/s.d);s.d=d;s.lead=lead;});
+let acc=0;S.forEach(s=>{s.s=acc;acc+=s.d;});
+window.CUES=S.map(s=>+(s.s+s.lead).toFixed(3));const TOTAL=acc;
 const TR=.35;
 function renderFrame(T){
   // find scene
   let i=S.findIndex(s=>T>=s.s&&T<s.s+s.d);if(i<0)i=S.length-1;const sc=S[i];
-  bg(T);ctx.save();sc.f(T-sc.s);ctx.restore();
+  bg(T);ctx.save();sc.f((T-sc.s)/sc.k);ctx.restore();
   // progress bar
   ctx.fillStyle='rgba(30,40,56,.12)';ctx.fillRect(0,0,W,10);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*T/TOTAL,10);
   // wipe transition
