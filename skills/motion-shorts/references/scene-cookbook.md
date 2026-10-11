@@ -67,6 +67,9 @@ Characters & speech
 - `bubble(cx,cy,[lines],p,{size,w,tail:[dx,dy],think,fill})` speech/thought bubble; the tail points to (cx+dx, cy+dy).
 - Draw the desk **after** the person so it covers the body, or use `cut`.
 
+Brand badges
+- `badge(key,x,y,h,t,{glints,alpha,rot})` enamel-pin badge (keys in SKILL.md) with a drop shadow and optional gold glint; `h` ≤ 480. Use 1–2 per video as the hero of a key scene, not as list bullets.
+
 Make new icons in the same flat style (2–3 colours from `C`, rounded rects, 8–12 px strokes) instead of importing images.
 
 ## 4. Recipes by content type

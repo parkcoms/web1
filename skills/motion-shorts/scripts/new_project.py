@@ -28,6 +28,7 @@ html = open(os.path.join(ROOT, 'assets', 'engine.html')).read().replace("theme:'
 open(os.path.join(d, 'index.html'), 'w').write(html)
 shutil.copytree(os.path.join(ROOT, 'assets', 'fonts'), os.path.join(d, 'fonts'), dirs_exist_ok=True)
 shutil.copy(os.path.join(ROOT, 'assets', 'portrait.js'), os.path.join(d, 'portrait.js'))   # for the 'portrait' ending
+shutil.copy(os.path.join(ROOT, 'assets', 'badges.js'), os.path.join(d, 'badges.js'))       # brand badges for badge()
 src = a.script or os.path.join(ROOT, 'assets', 'demo_script.json')
 if os.path.abspath(src) != os.path.abspath(os.path.join(d, 'script.json')): shutil.copy(src, os.path.join(d, 'script.json'))
 if os.path.exists(os.path.join(d, 'timing.js')):

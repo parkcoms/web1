@@ -12,6 +12,7 @@ canvas{display:block;margin:0 auto;height:100vh;width:auto}
 <body><canvas id="c" width="1080" height="1920"></canvas>
 <script src="timing.js"></script>
 <script src="portrait.js"></script>
+<script src="badges.js"></script>
 <script>
 /* =====================================================================================
    motion-shorts engine. Edit CONFIG, the SCENES section, CAPS, TRANS and IRIS; leave the rest.
@@ -90,6 +91,20 @@ function stamp(x,y,label,p,{color=C.red,size=56,rot=-.12,w=null}={}){if(p<=0)ret
   const ww=w||ctx.measureText(label).width+60;ctx.strokeStyle=color;ctx.lineWidth=8;rr(-ww/2,-size*.85,ww,size*1.7,16);ctx.stroke();
   ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,0,4);});}
 function countUp(v,p){return Math.round(v*eo(p));}
+
+/* ---------- brand badges (enamel pins from badges.js; keys in SKILL.md) ----------
+   badge(key, x, y, h, t, {glints:[[t0,t1],...], alpha, rot}) draws the pin centred at (x,y) with height h (design px),
+   a soft drop shadow and optional gold glints passing over it. Native images are ~300–390 px tall: keep h ≤ ~480. */
+const BADGE={};Object.entries(window.BADGE_SRC||{}).forEach(([k,v])=>{BADGE[k]=new Image();BADGE[k].src=v;});
+const BADGE_BUF=new OffscreenCanvas(760,760),bctx=BADGE_BUF.getContext('2d');
+function badge(key,x,y,h,t=0,{glints=[],alpha=1,rot=0}={}){const img=BADGE[key];if(!img||!img.width||alpha<=0)return;
+  const s=Math.min(h/img.height,700/img.width),w=img.width*s,hh=img.height*s;
+  bctx.setTransform(1,0,0,1,0,0);bctx.globalCompositeOperation='source-over';bctx.clearRect(0,0,760,760);bctx.drawImage(img,380-w/2,380-hh/2,w,hh);
+  glints.forEach(([a,b])=>{const g=P(t,a,b);if(g<=0||g>=1)return;const gx=lerp(380-w/2-160,380+w/2+160,eio(g));bctx.globalCompositeOperation='source-atop';
+    const gr=bctx.createLinearGradient(gx-70,0,gx+70,0);gr.addColorStop(0,'rgba(255,255,255,0)');gr.addColorStop(.5,'rgba(255,250,225,.6)');gr.addColorStop(1,'rgba(255,255,255,0)');
+    bctx.save();bctx.translate(380,380);bctx.rotate(.35);bctx.translate(-380,-380);bctx.fillStyle=gr;bctx.fillRect(-400,-400,1560,1560);bctx.restore();});
+  ctx.save();ctx.globalAlpha*=alpha;ctx.translate(x,y);ctx.rotate(rot);ctx.shadowColor=CONFIG.theme==='dark'?'rgba(0,0,0,.5)':'rgba(30,40,56,.22)';ctx.shadowBlur=30;ctx.shadowOffsetY=16;
+  ctx.drawImage(BADGE_BUF,-380,-380);ctx.restore();}
 
 /* ---------- pictograms ---------- */
 function worker(x,y,s,{color=C.fg,hat=C.yellow,run=null,alpha=1,stopHand=false}={}){ctx.save();ctx.globalAlpha*=alpha;ctx.translate(x,y);ctx.scale(s,s);
@@ -507,6 +522,6 @@ function renderFrame(T){
 }
 window.renderFrame=renderFrame;window.FPS=FPS;
 TIMING=window.TIMINGDATA;build();
-window.ready=Promise.resolve().then(()=>Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다')))).then(()=>document.fonts.ready).then(()=>window.PORTRAIT_SRC?PORTRAIT.decode():0).then(()=>{if(S.some(s=>s.full))captureFrames();});
+window.ready=Promise.resolve().then(()=>Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다')))).then(()=>document.fonts.ready).then(()=>window.PORTRAIT_SRC?PORTRAIT.decode():0).then(()=>Promise.all(Object.values(BADGE).map(i=>i.decode()))).then(()=>{if(S.some(s=>s.full))captureFrames();});
 if(!location.search.includes('render')){window.ready.then(()=>{const st=performance.now();(function loop(){renderFrame(((performance.now()-st)/1000)%TOTAL);requestAnimationFrame(loop);})();});}
 </script></body></html>
