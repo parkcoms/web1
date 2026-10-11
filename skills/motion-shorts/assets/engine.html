@@ -28,6 +28,8 @@ const CONFIG={
   brand:'상생의 노동법  |  박재우 변호사',
   safeScale:.86,
   ending:'wave',                       // closing scene: 'wave' | 'seal' | 'tablet' | 'portrait' (new_project.py rotates them at random)
+  polish:true,                         // texture/light/depth/spring motion layer (see SKILL.md); false = flat look
+  grain:false,                         // animated film grain: off by default (4–5× file size, smeared by YouTube re-encoding)
   loop:true                            // last 0.5 s wipes back into frame 0 → seamless auto-replay
 };
 const W=1080,H=1920,FPS=30;
@@ -59,10 +61,20 @@ function txt(s,x,y,{w=800,size=48,color=C.fg,align='left',ls=0,alpha=1,base='alp
   ctx.letterSpacing=ls+'px';ctx.fillText(s,x,y);ctx.restore();}
 function tw(s,w,size,ls=0){ctx.save();font(w,size);ctx.letterSpacing=ls+'px';const m=ctx.measureText(s).width;ctx.restore();return m;}
 function rise(p,dy=40){return {a:eo(p),y:(1-eo(p))*dy};}
-function pop(p){return p<=0?0:eb(p);}
+const spr=p=>p<=0?0:p>=1?1:1-Math.exp(-6*p)*Math.cos(10.5*p);   // damped spring 0→1 with a small overshoot
+function pop(p){return p<=0?0:CONFIG.polish?spr(p):eb(p);}
 function withT(x,y,s,a,fn){ctx.save();ctx.globalAlpha*=a;ctx.translate(x,y);ctx.scale(s,s);fn();ctx.restore();}
 function hl(x,y,w,h,p,color=C.yellow,alpha=1){if(p<=0)return;ctx.save();ctx.fillStyle=color;ctx.globalAlpha*=alpha;rr(x,y,w*eo(p),h,8);ctx.fill();ctx.restore();}
-function panel(x,y,w,h,{fill=C.panel,r=28,stroke=C.line,glow=0}={}){ctx.save();
+function panel(x,y,w,h,o={}){if(CONFIG.polish)return panelP(x,y,w,h,o);return panelFlat(x,y,w,h,o);}
+// polished panel: vertical gradient, top highlight, long soft shadow (theme-aware)
+function panelP(x,y,w,h,{fill=C.panel,r=28,stroke=C.line,glow=0}={}){const dk=CONFIG.theme==='dark';ctx.save();
+  if(glow>0){ctx.shadowColor=`rgba(255,198,41,${.45*glow})`;ctx.shadowBlur=50*glow;}else{ctx.shadowColor=dk?'rgba(0,0,0,.5)':'rgba(30,40,56,.16)';ctx.shadowBlur=dk?48:40;ctx.shadowOffsetY=dk?26:20;}
+  let f=fill;if(fill===C.panel){f=ctx.createLinearGradient(0,y,0,y+h);f.addColorStop(0,dk?'#26303F':'#FFFFFF');f.addColorStop(1,dk?'#1A212C':'#F7F1E6');}
+  ctx.fillStyle=f;rr(x,y,w,h,r);ctx.fill();ctx.shadowColor='transparent';
+  ctx.strokeStyle=glow>0?`rgba(255,198,41,${.9*glow})`:(stroke===C.line?(dk?'rgba(255,255,255,.07)':'rgba(30,40,56,.10)'):stroke);ctx.lineWidth=glow>0?4:2;ctx.stroke();
+  ctx.save();rr(x,y,w,h,r);ctx.clip();const g=ctx.createLinearGradient(0,y,0,y+42);g.addColorStop(0,dk?'rgba(255,255,255,.10)':'rgba(255,255,255,.9)');g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g;ctx.fillRect(x,y,w,42);ctx.restore();ctx.restore();}
+function panelFlat(x,y,w,h,{fill=C.panel,r=28,stroke=C.line,glow=0}={}){ctx.save();
   if(glow>0){ctx.shadowColor=`rgba(255,198,41,${.45*glow})`;ctx.shadowBlur=50*glow;}
   else{ctx.shadowColor='rgba(0,0,0,.35)';ctx.shadowBlur=30;ctx.shadowOffsetY=12;}
   ctx.fillStyle=fill;rr(x,y,w,h,r);ctx.fill();ctx.shadowColor='transparent';ctx.strokeStyle=glow>0?`rgba(255,198,41,${.9*glow})`:stroke;ctx.lineWidth=glow>0?4:2;ctx.stroke();ctx.restore();}
@@ -87,7 +99,8 @@ function checkMark(x,y,s,p,color=C.green){if(p<=0)return;ctx.save();ctx.strokeSt
 function burst(x,y,p,color=C.yellow,r0=40,r1=90,n=8){if(p<=0||p>=1)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=7;ctx.lineCap='round';
   const a=eo(p);for(let i=0;i<n;i++){const ang=i*Math.PI*2/n;const ra=lerp(r0,r1,a),rb=lerp(r0,r1,Math.min(1,a+.35));
     ctx.globalAlpha=1-p;ctx.beginPath();ctx.moveTo(x+Math.cos(ang)*ra,y+Math.sin(ang)*ra);ctx.lineTo(x+Math.cos(ang)*rb,y+Math.sin(ang)*rb);ctx.stroke();}ctx.restore();}
-function stamp(x,y,label,p,{color=C.red,size=56,rot=-.12,w=null}={}){if(p<=0)return;const s=lerp(1.9,1,eo(p));withT(x,y,s,clamp(p*2),()=>{ctx.rotate(rot);font(900,size);
+function stamp(x,y,label,p,o={}){if(p<=0)return;if(CONFIG.polish&&p<1)[.6,.35].forEach((k,i)=>{ctx.save();ctx.globalAlpha*=.18/(i+1);stampFlat(x,y,label,clamp(p*k),o);ctx.restore();});stampFlat(x,y,label,p,o);}   // motion-blur ghosts while slamming
+function stampFlat(x,y,label,p,{color=C.red,size=56,rot=-.12,w=null}={}){if(p<=0)return;const s=lerp(1.9,1,eo(p));withT(x,y,s,clamp(p*2),()=>{ctx.rotate(rot);font(900,size);
   const ww=w||ctx.measureText(label).width+60;ctx.strokeStyle=color;ctx.lineWidth=8;rr(-ww/2,-size*.85,ww,size*1.7,16);ctx.stroke();
   ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,0,4);});}
 function countUp(v,p){return Math.round(v*eo(p));}
@@ -248,8 +261,15 @@ function tag(x,y,label,p,bg=C.navy,fg='#fff'){if(p<=0)return;const a=eo(p);font(
   ctx.save();ctx.globalAlpha*=a;ctx.translate(x-(1-a)*60,y);ctx.fillStyle=bg;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(w,0);ctx.lineTo(w-14,70);ctx.lineTo(0,70);ctx.closePath();ctx.fill();
   ctx.fillStyle=fg;ctx.textBaseline='middle';ctx.fillText(label,26,37);ctx.restore();}
 // headline: lines pop in at the given start times
+// kinetic type: characters spring up under a mask, staggered. t0 <= 0 means "already on screen at frame 0" (drawn static).
+function kineticLine(s,x,y,t,t0,{size=96,w=900,color=C.fg,stagger=.025,align='center',ls=-2}={}){if(t<t0-.01)return;font(w,size);ctx.letterSpacing=ls+'px';
+  const ch=[...s],ws=ch.map(c=>ctx.measureText(c).width),tot=ws.reduce((a,b)=>a+b,0);let cx=align==='center'?x-tot/2:align==='right'?x-tot:x;
+  ctx.save();ctx.beginPath();ctx.rect(0,y-size*1.05,W,size*1.4);ctx.clip();ctx.fillStyle=color;ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  ch.forEach((c,i)=>{const p=t0<=0?1:P(t,t0+i*stagger,t0+i*stagger+.55),k=spr(p);if(p>0){ctx.save();ctx.globalAlpha*=clamp(p*4);ctx.fillText(c,cx,y+(1-k)*size*1.1);ctx.restore();}cx+=ws[i];});
+  ctx.restore();ctx.letterSpacing='0px';return tot;}
 function headline(lines,t,starts,{y=330,size=86,hlc=C.yellow}={}){
-  lines.forEach((l,i)=>{const t0=starts[i];const p=P(t,t0,t0+.4);if(p<=0)return;const s=lerp(1.25,1,eb(p));
+  lines.forEach((l,i)=>{const t0=starts[i];const p=P(t,t0,t0+.4);if(p<=0)return;
+    if(CONFIG.polish){const w=tw(l,900,size,-2),yy=y+i*size*1.25;hl(W/2-w/2-14,yy-size*.38,w+28,size*.48,P(t,t0+.25,t0+.65),hlc);kineticLine(l,W/2,yy,t,t0,{size});return;}const s=lerp(1.25,1,eb(p));
     const w=tw(l,900,size,-2),x=W/2,yy=y+i*size*1.25;
     ctx.save();ctx.globalAlpha*=clamp(p*2.5);ctx.translate(x,yy);ctx.scale(s,s);ctx.translate(-x,-yy);
     hl(x-w/2-14,yy-size*.38,w+28,size*.48,P(t,t0+.2,t0+.6),hlc);
@@ -274,13 +294,37 @@ function itemHead(t,n,title,t0,tTitle,{sub=null,tSub=0,eff=null}={}){
 
 
 /* ---------- background + header ---------- */
+// polish: cached paper-fibre texture, slow light pools, depth layer, spring check rows, vignette/grain post pass
+let PAPER_TEX=null,DEPTH=null,GRAIN=null;
+function paperTex(){if(PAPER_TEX)return PAPER_TEX;PAPER_TEX=new OffscreenCanvas(W/2,H/2);const d=PAPER_TEX.getContext('2d');let s=11;const r=()=>(s=(s*16807)%2147483647)/2147483647;
+  for(let i=0;i<1800;i++){d.fillStyle=`rgba(120,95,60,${.02+r()*.05})`;d.fillRect(r()*W/2,r()*H/2,.6+r()*1.5,4+r()*20);}return PAPER_TEX;}   // drawn at half size, upscaled ×2 for soft fibres
+function lightPools(t){const dk=CONFIG.theme==='dark';ctx.save();ctx.globalCompositeOperation=dk?'lighter':'source-over';
+  [[300+Math.sin(t*.25)*160,520+Math.cos(t*.2)*120,620,dk?'rgba(90,169,255,.07)':'rgba(255,255,255,.22)'],[820+Math.cos(t*.22)*140,1250+Math.sin(t*.3)*140,700,dk?'rgba(255,198,41,.05)':'rgba(246,201,69,.10)']].forEach(([x,y,r,c])=>{
+    const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,c);g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);});ctx.restore();}
+// depthBG: blurred document silhouettes on a slow parallax drift (pre-rendered once). Use only on sparse scenes (hook, section intro).
+function depthBG(t,{alpha=1,big=null}={}){const dk=CONFIG.theme==='dark';if(!DEPTH){DEPTH=new OffscreenCanvas(W+200,H);const d=DEPTH.getContext('2d');d.filter='blur(7px)';
+    [[260,1480,1.6,-.2],[1000,560,1.3,.25],[920,1580,1.1,.1],[150,430,1.0,.15]].forEach(([x,y,s,r])=>{d.save();d.translate(x,y);d.rotate(r);d.scale(s,s);
+      d.fillStyle='#F3F5F8';d.beginPath();d.roundRect(-70,-90,140,180,14);d.fill();d.fillStyle='#9AA4B2';for(let i=0;i<4;i++){d.beginPath();d.roundRect(-46,-28+i*28,i===3?56:92,9,4);d.fill();}d.restore();});}
+  const cam=Math.sin(t*.35);ctx.save();ctx.globalAlpha*=(dk?.08:.10)*alpha;ctx.drawImage(DEPTH,-100+cam*-26,Math.sin(t*.6)*10);ctx.restore();
+  if(big){ctx.save();ctx.globalAlpha*=(dk?.05:.06)*alpha;font(900,560);ctx.textAlign='right';ctx.textBaseline='alphabetic';ctx.fillStyle=dk?C.yellow:C.yellowD;ctx.fillText(big,1060+cam*-14,1040);ctx.restore();}}
+// checkRow: list row that springs in from the right with an accent bar and a drawn check
+function checkRow(x,y,label,p,{size=42,w=820,sub=null}={}){if(p<=0)return;const k=spr(p),dk=CONFIG.theme==='dark',hh=sub?112:100;ctx.save();ctx.globalAlpha*=clamp(p*3);ctx.translate((1-k)*120,0);
+  const g=ctx.createLinearGradient(x,0,x+w,0);g.addColorStop(0,dk?'rgba(255,255,255,.07)':'rgba(30,40,56,.06)');g.addColorStop(1,dk?'rgba(255,255,255,.02)':'rgba(30,40,56,.02)');
+  ctx.fillStyle=g;rr(x,y-50,w,hh,18);ctx.fill();ctx.fillStyle=dk?C.yellow:C.yellowD;rr(x,y-50,6,hh,3);ctx.fill();checkMark(x+52,y,1,P(p,.35,1));
+  txt(label,x+100,y+14,{w:900,size});if(sub)txt(sub,x+100,y+52,{w:700,size:28,color:C.muted});ctx.restore();}
+function post(T){const c=mctx,dk=CONFIG.theme==='dark';c.save();c.setTransform(1,0,0,1,0,0);const v=c.createRadialGradient(540,860,420,540,960,1250);v.addColorStop(0,'rgba(0,0,0,0)');
+  v.addColorStop(1,dk?'rgba(0,0,0,.42)':'rgba(70,50,25,.16)');c.fillStyle=v;c.fillRect(0,0,W,H);
+  if(CONFIG.grain){if(!GRAIN){GRAIN=new OffscreenCanvas(256,256);const g=GRAIN.getContext('2d'),d=g.createImageData(256,256);let s=7;for(let i=0;i<d.data.length;i+=4){s=(s*16807)%2147483647;const q=s%255;d.data[i]=d.data[i+1]=d.data[i+2]=q;d.data[i+3]=255;}g.putImageData(d,0,0);}
+    c.globalCompositeOperation='overlay';c.globalAlpha=.07;const f=Math.floor(T*24)%8;c.translate(-(f*37%256),-(f*91%256));c.fillStyle=c.createPattern(GRAIN,'repeat');c.fillRect(0,0,W+256,H+256);}
+  c.restore();}
 function bg(t){
   if(CONFIG.theme==='dark'){const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0F131A');g.addColorStop(1,'#151B25');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
     ctx.strokeStyle=C.grid;ctx.lineWidth=2;const o=(t*10)%80;
     for(let x=0;x<=W;x+=80){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
     for(let y=-o;y<=H;y+=80){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}}
   else{ctx.fillStyle=C.bg;ctx.fillRect(0,0,W,H);const o=(t*12)%60;ctx.fillStyle=C.grid;
-    for(let y=40-o;y<H+60;y+=60)for(let x=40;x<W;x+=60){ctx.beginPath();ctx.arc(x,y,2.4,0,7);ctx.fill();}}}
+    for(let y=40-o;y<H+60;y+=60)for(let x=40;x<W;x+=60){ctx.beginPath();ctx.arc(x,y,2.4,0,7);ctx.fill();}}
+  if(CONFIG.polish){if(CONFIG.theme!=='dark'){ctx.save();ctx.globalAlpha=.5;ctx.globalCompositeOperation='multiply';ctx.drawImage(paperTex(),0,0,W,H);ctx.restore();}lightPools(t);}}
 // item = 1..CONFIG.items highlights that chip; -1 shows only the series line
 function header(T,item){if(CONFIG.series)txt(CONFIG.series,W/2,104,{w:800,size:28,color:C.muted,align:'center',ls:2});
   if(item<0||!CONFIG.items)return;const n=CONFIG.items,gap=Math.min(96,800/n),x0=W/2-gap*(n-1)/2;
@@ -395,7 +439,7 @@ ENDINGS.portrait=q=>({f(t){
 },sfx:()=>[['whoosh',.05],['thud',.58],['sparkle',.65],['pop',.75],['pop',1.3],['sparkle',3.3]]});
 function ending(kind,{q=['여러분 회사는','어떻게 하고 있나요?'],min=5}={}){if(kind==='portrait'&&!window.PORTRAIT_SRC)kind='wave';const mk=ENDINGS[kind]||ENDINGS.wave;return {item:-1,lead:0,tail:0,min,noCap:true,...mk(q)};}
 let CAP=null;   // full-frame captures for the 'tablet' ending: frame 0 and the frame just before the last scene
-function captureFrames(){const g=T=>{renderFrame(T);const c=new OffscreenCanvas(W,H);c.getContext('2d').drawImage(main,0,0);return c;};CAP={first:g(0),last:g(S[S.length-1].s-1e-3)};}
+function captureFrames(){const g=T=>{(window.rawFrame||renderFrame)(T);const c=new OffscreenCanvas(W,H);c.getContext('2d').drawImage(main,0,0);return c;};CAP={first:g(0),last:g(S[S.length-1].s-1e-3)};}
 
 /* =====================================================================================
    SCENES — one entry per narration clip (same order as script.json).
@@ -520,7 +564,7 @@ function renderFrame(T){
   ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(0,0,W,8);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*T/TOTAL,8);
 
 }
-window.renderFrame=renderFrame;window.FPS=FPS;
+window.rawFrame=renderFrame;window.renderFrame=function(T){window.rawFrame(T);if(CONFIG.polish)post(T);};window.FPS=FPS;   // post pass (vignette, optional grain) on top of every frame
 TIMING=window.TIMINGDATA;build();
 window.ready=Promise.resolve().then(()=>Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다')))).then(()=>document.fonts.ready).then(()=>window.PORTRAIT_SRC?PORTRAIT.decode():0).then(()=>Promise.all(Object.values(BADGE).map(i=>i.decode()))).then(()=>{if(S.some(s=>s.full))captureFrames();});
 if(!location.search.includes('render')){window.ready.then(()=>{const st=performance.now();(function loop(){renderFrame(((performance.now()-st)/1000)%TOTAL);requestAnimationFrame(loop);})();});}

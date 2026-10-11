@@ -67,6 +67,13 @@ Characters & speech
 - `bubble(cx,cy,[lines],p,{size,w,tail:[dx,dy],think,fill})` speech/thought bubble; the tail points to (cx+dx, cy+dy).
 - Draw the desk **after** the person so it covers the body, or use `cut`.
 
+Polish layer (CONFIG.polish, on by default)
+- `spr(p)` damped spring 0→1 (small overshoot); `pop()` uses it automatically. Prefer `spr` for things that land (cards, chips, rows).
+- `checkRow(x,y,label,p,{w,size,sub})` list row: springs in from the right, accent bar, drawn check. Use it instead of hand-made check rows.
+- `kineticLine(s,x,y,t,t0,{size,color,align})` one big line whose characters spring up under a mask; `headline()` already does this. t0 ≤ 0 draws it static (frame-0 rule).
+- `depthBG(t,{alpha,big})` blurred drifting documents (pre-rendered once) + optional giant faint number (`big:'01'`); call it first in the scene. Only on sparse scenes.
+- Never call `ctx.filter='blur()'` per frame in a scene — it made a 12 s scene render 8× slower. Pre-render blurred art once into an OffscreenCanvas.
+
 Brand badges
 - `badge(key,x,y,h,t,{glints,alpha,rot})` enamel-pin badge (keys in SKILL.md) with a drop shadow and optional gold glint; `h` ≤ 480. Use 1–2 per video as the hero of a key scene, not as list bullets.
 
