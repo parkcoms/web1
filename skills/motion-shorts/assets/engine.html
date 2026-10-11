@@ -244,14 +244,14 @@ function itemHead(t,n,title,t0,tTitle,{sub=null,tSub=0,eff=null}={}){
   const num=String(n).padStart(2,'0'),nw=tw(num,900,140);
   ctx.save();ctx.globalAlpha=clamp(p*2);const s=lerp(1.6,1,eo(p));
   ctx.translate(90+nw/2,310);ctx.scale(s,s);
-  font(900,140);ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=5;ctx.strokeStyle=C.yellow;ctx.strokeText(num,0,0);
+  font(900,140);ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=5;ctx.strokeStyle=CONFIG.theme==='paper'?C.yellowD:C.yellow;ctx.strokeText(num,0,0);
   ctx.restore();
   const tx=90+nw+34;
   const p2=P(t,tTitle,tTitle+.35);if(p2>0){const r=rise(p2,30);txt(title,tx,sub?312:336+0,{w:900,size:62,alpha:r.a,ls:-1});}
   if(sub){const p3=P(t,tSub,tSub+.35);if(p3>0){const r=rise(p3,20);txt(sub,tx+2,362+r.y,{w:700,size:30,color:C.muted,alpha:r.a});}}
   const hp=clamp(P(t,t0+.2,t0+.6));
   if(eff){const p4=P(t,t0+.3,t0+.7);hazard(90,404,560,10,t*60,hp);
-    if(p4>0){ctx.save();ctx.globalAlpha=eo(p4);chip(990,409,eff,{bg:'rgba(255,198,41,.16)',fg:C.yellow,size:28,align:'right',padX:20});ctx.restore();}}
+    if(p4>0){ctx.save();ctx.globalAlpha=eo(p4);chip(990,409,eff,{bg:'rgba(255,198,41,.16)',fg:CONFIG.theme==='paper'?C.yellowD:C.yellow,size:28,align:'right',padX:20});ctx.restore();}}
   else hazard(90,404,900,10,t*60,hp);
 }
 
@@ -334,12 +334,13 @@ const TD=.42,LOOP_TD=.5;
 let TOTAL=0,CUES=[],SFX=[],PHRASES=[];
 function build(){
   let acc=0;
-  S.forEach((s,i)=>{s.d=Math.max(s.min||0,s.lead+TIMING.CLIP[i]+s.tail);
-    s.words=TIMING.W[i].map(([w,a,b])=>[w,a+s.lead,b+s.lead]);
+  S.forEach((s,i)=>{const clip=TIMING.CLIP[i]||0;   // scenes past the script are silent (e.g. a closing card)
+    s.d=Math.max(s.min||0,s.lead+clip+s.tail);
+    s.words=(TIMING.W[i]||[]).map(([w,a,b])=>[w,a+s.lead,b+s.lead]);
     const find=(p,n)=>{const m=s.words.filter(x=>x[0].startsWith(p));if(!m[n])throw new Error(`word "${p}"#${n} not in scene ${i+1}`);return m[n];};
-    s.e={w:(p,n=0)=>find(p,n)[1],we:(p,n=0)=>find(p,n)[2],end:s.lead+TIMING.CLIP[i]};
+    s.e={w:(p,n=0)=>find(p,n)[1],we:(p,n=0)=>find(p,n)[2],end:s.lead+clip};
     s.s=acc;acc+=s.d;});
-  TOTAL=acc;CUES=S.map(s=>+(s.s+s.lead).toFixed(3));
+  TOTAL=acc;CUES=S.filter((s,i)=>i<TIMING.CLIP.length).map(s=>+(s.s+s.lead).toFixed(3));
   S.forEach((s,i)=>{(s.sfx?s.sfx(s.e):[]).forEach(([k,t,d])=>SFX.push([k,+(s.s+t).toFixed(3),d||0]));if(i>0)SFX.push(['whoosh',+(s.s-.05).toFixed(3),0]);});
   if(CONFIG.loop)SFX.push(['whoosh',+(TOTAL-LOOP_TD-.05).toFixed(3),0]);
   S.forEach((s,i)=>{if(!CAPS[i])return;let k=0;

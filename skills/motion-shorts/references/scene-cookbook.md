@@ -26,6 +26,7 @@ S.push({item:2, lead:.3, tail:.55, f(t,e){
 - `lead`: seconds before narration starts in the scene (0.25–0.35; give 0.5+ if a big card must settle first).
   `tail`: seconds after narration (0.5–0.6; CTA 1.2+). `min`: minimum scene length (CTA ≈ 6 s so the question card can be read).
 - `item`: which header chip is lit (1..CONFIG.items) or -1.
+- **Silent scenes**: add scenes after the last scripted one (no narration line) for a closing card. They get `CLIP=0`, no words and no captions; give them `min` (≈5 s) and time everything with plain seconds. Used for a closing scene without a spoken sign-off — users preferred not reading the sign-off in Shorts because it signals "the end" and works against the loop.
 - Wrap groups in `ctx.save()/restore()`; never leave globalAlpha or transforms changed.
 
 ## 2. Layout map (design space 1080×1920, scaled by 0.86 into the upper frame)

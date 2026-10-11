@@ -16,6 +16,9 @@ html = open(os.path.join(ROOT, 'assets', 'engine.html')).read().replace("theme:'
 open(os.path.join(d, 'index.html'), 'w').write(html)
 shutil.copytree(os.path.join(ROOT, 'assets', 'fonts'), os.path.join(d, 'fonts'), dirs_exist_ok=True)
 src = a.script or os.path.join(ROOT, 'assets', 'demo_script.json')
-shutil.copy(src, os.path.join(d, 'script.json'))
-subprocess.run([sys.executable, os.path.join(HERE, 'prep_audio.py'), '--placeholder', '--script', os.path.join(d, 'script.json'), '--out', d], check=True)
+if os.path.abspath(src) != os.path.abspath(os.path.join(d, 'script.json')): shutil.copy(src, os.path.join(d, 'script.json'))
+if os.path.exists(os.path.join(d, 'timing.js')):
+    print('timing.js already exists (real timing?) - kept as is')
+else:
+    subprocess.run([sys.executable, os.path.join(HERE, 'prep_audio.py'), '--placeholder', '--script', os.path.join(d, 'script.json'), '--out', d], check=True)
 print('project ready:', d, '(index.html, fonts/, script.json, placeholder timing.js)')
