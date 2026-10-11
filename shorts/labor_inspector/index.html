@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>Motion Shorts</title>
+<style>
+@font-face{font-family:P;font-weight:500;src:url(fonts/Pretendard-Medium.woff2)}
+@font-face{font-family:P;font-weight:700;src:url(fonts/Pretendard-Bold.woff2)}
+@font-face{font-family:P;font-weight:800;src:url(fonts/Pretendard-ExtraBold.woff2)}
+@font-face{font-family:P;font-weight:900;src:url(fonts/Pretendard-Black.woff2)}
+html,body{margin:0;background:#000}
+canvas{display:block;margin:0 auto;height:100vh;width:auto}
+</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script src="timing.js"></script>
+<script>
+/* =====================================================================================
+   motion-shorts engine. Edit CONFIG, the SCENES section, CAPS, TRANS and IRIS; leave the rest.
+   Scene coordinates are a 1080x1920 design space. drawScene() scales them by CONFIG.safeScale
+   into the upper part of the frame so captions (screen y≈1548) and the Shorts UI never cover
+   content. Keep scene content between design y≈230 and y≈1680.
+   Preview: open index.html in a browser (loops in real time). Render: scripts/render.js.
+   ===================================================================================== */
+const CONFIG={
+  theme:'dark',                        // 'dark' = infographic / news / law change, 'paper' = warm story with characters
+  series:'노동감독관 직접 수사 · 기업 대응 4',          // small line at the very top ('' hides it)
+  items:4,                             // progress chips in the header (0 hides them); scenes set item:1..n or -1
+  brand:'상생의 노동법  |  박재우 변호사',
+  safeScale:.86,
+  ending:'wave',                       // closing scene: 'wave' | 'seal' | 'tablet' (new_project.py rotates them at random)
+  loop:true                            // last 0.5 s wipes back into frame 0 → seamless auto-replay
+};
+const W=1080,H=1920,FPS=30;
+const main=document.getElementById('c'),mctx=main.getContext('2d');
+const offA=new OffscreenCanvas(W,H),offB=new OffscreenCanvas(W,H);
+const actxA=offA.getContext('2d'),actxB=offB.getContext('2d');
+let ctx=mctx;   // every helper draws on the current ctx (swapped to offscreen canvases during transitions)
+const THEMES={
+  dark:{bg:'#11151C',bg2:'#171C25',panel:'#1D2430',panel2:'#263040',line:'#33405280',yellow:'#FFC629',yellowD:'#C99A10',orange:'#FF8A1F',
+    red:'#FF4B4B',green:'#34D399',blue:'#5AA9FF',fg:'#F3F5F8',muted:'#8B96A8',ink:'#11151C',paper:'#FFFFFF',navy:'#2C4767',olive:'#5D6A30',
+    skin:'#F3D3B8',skinS:'#E6BC9C',hair:'#2E241D',capBg:'rgba(243,245,248,.96)',capFg:'#11151C',capDim:'rgba(17,21,28,.38)',grid:'rgba(90,169,255,.05)',hazard2:'#111111'},
+  paper:{bg:'#F4EEE2',bg2:'#EFE7D8',panel:'#FFFDF8',panel2:'#E6ECF3',line:'#DCD3C2',yellow:'#F6C945',yellowD:'#B8901A',orange:'#E8873A',
+    red:'#D2483F',green:'#5D9A4A',blue:'#2F5FA8',fg:'#1E2838',muted:'#7B8392',ink:'#1E2838',paper:'#FFFFFF',navy:'#2C4767',olive:'#5D6A30',
+    skin:'#F3D3B8',skinS:'#E6BC9C',hair:'#3A2A21',capBg:'rgba(30,40,56,.92)',capFg:'#FFFFFF',capDim:'rgba(255,255,255,.5)',grid:'rgba(30,40,56,.05)',hazard2:'#1E2838'}};
+const C=THEMES[CONFIG.theme];
+let TIMING=null; // window.TIMINGDATA from timing.js: {W:[[word,start,end],...] per scene, CLIP:[seconds per scene]}
+
+/* ---------- utils ---------- */
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const P=(t,a,b)=>clamp((t-a)/(b-a));
+const eo=t=>1-Math.pow(1-t,3);
+const eio=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eb=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)};
+function font(w,s){ctx.font=`${w} ${s}px P`;}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);}
+function txt(s,x,y,{w=800,size=48,color=C.fg,align='left',ls=0,alpha=1,base='alphabetic'}={}){
+  ctx.save();ctx.globalAlpha*=alpha;font(w,size);ctx.fillStyle=color;ctx.textAlign=align;ctx.textBaseline=base;
+  ctx.letterSpacing=ls+'px';ctx.fillText(s,x,y);ctx.restore();}
+function tw(s,w,size,ls=0){ctx.save();font(w,size);ctx.letterSpacing=ls+'px';const m=ctx.measureText(s).width;ctx.restore();return m;}
+function rise(p,dy=40){return {a:eo(p),y:(1-eo(p))*dy};}
+function pop(p){return p<=0?0:eb(p);}
+function withT(x,y,s,a,fn){ctx.save();ctx.globalAlpha*=a;ctx.translate(x,y);ctx.scale(s,s);fn();ctx.restore();}
+function hl(x,y,w,h,p,color=C.yellow,alpha=1){if(p<=0)return;ctx.save();ctx.fillStyle=color;ctx.globalAlpha*=alpha;rr(x,y,w*eo(p),h,8);ctx.fill();ctx.restore();}
+function panel(x,y,w,h,{fill=C.panel,r=28,stroke=C.line,glow=0}={}){ctx.save();
+  if(glow>0){ctx.shadowColor=`rgba(255,198,41,${.45*glow})`;ctx.shadowBlur=50*glow;}
+  else{ctx.shadowColor='rgba(0,0,0,.35)';ctx.shadowBlur=30;ctx.shadowOffsetY=12;}
+  ctx.fillStyle=fill;rr(x,y,w,h,r);ctx.fill();ctx.shadowColor='transparent';ctx.strokeStyle=glow>0?`rgba(255,198,41,${.9*glow})`:stroke;ctx.lineWidth=glow>0?4:2;ctx.stroke();ctx.restore();}
+function chip(x,y,s,{bg=C.panel2,fg=C.fg,size=34,w=800,align='center',padX=26,h=null}={}){font(w,size);const tw_=ctx.measureText(s).width+padX*2,hh=h||size*1.7;
+  const x0=align==='center'?x-tw_/2:align==='right'?x-tw_:x;ctx.fillStyle=bg;rr(x0,y-hh/2,tw_,hh,hh/2);ctx.fill();
+  ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(s,x0+tw_/2,y+2);return tw_;}
+function newBadge(x,y,p,label='NEW'){if(p<=0)return;withT(x,y,pop(p),1,()=>{ctx.rotate(-.08);chip(0,0,label,{bg:C.red,fg:'#fff',size:28,w:900,padX:18});});}
+// hazard stripes clipped into a rect
+function hazard(x,y,w,h,off=0,a=1,c1=C.yellow,c2=C.hazard2){ctx.save();ctx.globalAlpha*=a;ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+  ctx.fillStyle=c2;ctx.fillRect(x,y,w,h);ctx.fillStyle=c1;const s=60;
+  for(let k=-h-s*2+(off%(s*2));k<w+h;k+=s*2){ctx.beginPath();ctx.moveTo(x+k,y+h);ctx.lineTo(x+k+s,y+h);ctx.lineTo(x+k+s+h,y);ctx.lineTo(x+k+h,y);ctx.closePath();ctx.fill();}
+  ctx.restore();}
+function arrow(x1,y1,x2,y2,p,{color=C.yellow,wd=10,head=26,dash=false}={}){if(p<=0)return;const x=lerp(x1,x2,eo(p)),y=lerp(y1,y2,eo(p));
+  ctx.save();ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=wd;ctx.lineCap='round';if(dash)ctx.setLineDash([18,16]);
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x,y);ctx.stroke();ctx.setLineDash([]);
+  const a=Math.atan2(y2-y1,x2-x1);ctx.beginPath();ctx.moveTo(x+Math.cos(a)*6,y+Math.sin(a)*6);
+  ctx.lineTo(x-Math.cos(a-.5)*head,y-Math.sin(a-.5)*head);ctx.lineTo(x-Math.cos(a+.5)*head,y-Math.sin(a+.5)*head);ctx.closePath();ctx.fill();ctx.restore();}
+function checkMark(x,y,s,p,color=C.green){if(p<=0)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=10*s;ctx.lineCap='round';ctx.lineJoin='round';
+  const pts=[[x-22*s,y],[x-6*s,y+16*s],[x+24*s,y-18*s]];const L1=Math.hypot(16,16),L2=Math.hypot(30,34),tot=L1+L2;const d=eo(p)*tot;
+  ctx.beginPath();ctx.moveTo(...pts[0]);if(d<=L1){const k=d/L1;ctx.lineTo(lerp(pts[0][0],pts[1][0],k),lerp(pts[0][1],pts[1][1],k));}
+  else{ctx.lineTo(...pts[1]);const k=(d-L1)/L2;ctx.lineTo(lerp(pts[1][0],pts[2][0],k),lerp(pts[1][1],pts[2][1],k));}ctx.stroke();ctx.restore();}
+function burst(x,y,p,color=C.yellow,r0=40,r1=90,n=8){if(p<=0||p>=1)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=7;ctx.lineCap='round';
+  const a=eo(p);for(let i=0;i<n;i++){const ang=i*Math.PI*2/n;const ra=lerp(r0,r1,a),rb=lerp(r0,r1,Math.min(1,a+.35));
+    ctx.globalAlpha=1-p;ctx.beginPath();ctx.moveTo(x+Math.cos(ang)*ra,y+Math.sin(ang)*ra);ctx.lineTo(x+Math.cos(ang)*rb,y+Math.sin(ang)*rb);ctx.stroke();}ctx.restore();}
+function stamp(x,y,label,p,{color=C.red,size=56,rot=-.12,w=null}={}){if(p<=0)return;const s=lerp(1.9,1,eo(p));withT(x,y,s,clamp(p*2),()=>{ctx.rotate(rot);font(900,size);
+  const ww=w||ctx.measureText(label).width+60;ctx.strokeStyle=color;ctx.lineWidth=8;rr(-ww/2,-size*.85,ww,size*1.7,16);ctx.stroke();
+  ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,0,4);});}
+function countUp(v,p){return Math.round(v*eo(p));}
+
+/* ---------- pictograms ---------- */
+function worker(x,y,s,{color=C.fg,hat=C.yellow,run=null,alpha=1,stopHand=false}={}){ctx.save();ctx.globalAlpha*=alpha;ctx.translate(x,y);ctx.scale(s,s);
+  ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineCap='round';ctx.lineWidth=22;
+  const ph=run===null?0:run;const sw=Math.sin(ph)*.7;
+  // legs
+  ctx.beginPath();ctx.moveTo(0,40);ctx.lineTo(Math.sin(sw)*60,120);ctx.moveTo(0,40);ctx.lineTo(-Math.sin(sw)*60,120);ctx.stroke();
+  // body
+  ctx.beginPath();ctx.moveTo(0,-30);ctx.lineTo(run===null?0:12,40);ctx.stroke();
+  // arms
+  if(stopHand){ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(56,-62);ctx.moveTo(0,-20);ctx.lineTo(-34,22);ctx.stroke();
+    ctx.beginPath();ctx.ellipse(66,-78,20,26,-.6,0,7);ctx.fill();}
+  else{ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(-Math.sin(sw)*50,30);ctx.moveTo(0,-20);ctx.lineTo(Math.sin(sw)*50,30);ctx.stroke();}
+  // head + hard hat
+  ctx.beginPath();ctx.arc(0,-62,26,0,7);ctx.fill();
+  ctx.fillStyle=hat;ctx.beginPath();ctx.arc(0,-70,30,Math.PI,0);ctx.fill();ctx.fillRect(-40,-72,80,10);
+  ctx.restore();}
+function stopSign(x,y,r,p){if(p<=0)return;withT(x,y,pop(p),1,()=>{ctx.fillStyle=C.red;ctx.beginPath();for(let i=0;i<8;i++){const a=Math.PI/8+i*Math.PI/4;ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);}ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#fff';ctx.lineWidth=r*.07;ctx.stroke();txt('STOP',0,r*.2,{w:900,size:r*.5,color:'#fff',align:'center'});});}
+function exitSign(x,y,s,p){if(p<=0)return;withT(x,y,s*pop(p),1,()=>{ctx.fillStyle=C.green;rr(-90,-55,180,110,14);ctx.fill();
+  ctx.fillStyle='#fff';worker(-30,6,.32,{color:'#fff',hat:'#fff',run:4});ctx.strokeStyle='#fff';ctx.lineWidth=10;ctx.beginPath();ctx.moveTo(30,0);ctx.lineTo(70,0);ctx.moveTo(56,-14);ctx.lineTo(70,0);ctx.lineTo(56,14);ctx.stroke();});}
+function building(x,y,w,h,label,{color=C.panel2,accent=C.blue}={}){ctx.fillStyle=color;rr(x,y,w,h,14);ctx.fill();ctx.fillStyle=accent;rr(x,y,w,16,[14,14,0,0]);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.12)';for(let r=0;r<2;r++)for(let c=0;c<5;c++)rr(x+24+c*((w-48)/5),y+36+r*36,(w-48)/5-14,22,4),ctx.fill();
+  txt(label,x+w/2,y+h-22,{w:900,size:40,align:'center'});}
+function crane(x,y,s,t){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.strokeStyle=C.yellow;ctx.lineWidth=10;ctx.lineJoin='round';
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-260);ctx.lineTo(260,-260);ctx.moveTo(0,-260);ctx.lineTo(-80,-260);ctx.moveTo(0,-300);ctx.lineTo(0,-260);ctx.stroke();
+  for(let i=0;i<6;i++){ctx.beginPath();ctx.moveTo(-14,-i*44);ctx.lineTo(14,-i*44-22);ctx.stroke();}
+  const hx=150+Math.sin(t*1.2)*60;ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(hx,-260);ctx.lineTo(hx,-140);ctx.stroke();ctx.fillStyle=C.orange;rr(hx-30,-140,60,40,6);ctx.fill();
+  ctx.fillStyle=C.yellow;rr(-110,-275,60,40,6);ctx.fill();ctx.restore();}
+function thermo(x,y,s,lvl){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle='#fff';rr(-18,-90,36,130,18);ctx.fill();ctx.beginPath();ctx.arc(0,50,32,0,7);ctx.fill();
+  ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(0,50,22,0,7);ctx.fill();rr(-9,50-120*lvl,18,120*lvl,9);ctx.fill();ctx.restore();}
+function snow(x,y,s,rot){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.rotate(rot);ctx.strokeStyle=C.blue;ctx.lineWidth=10;ctx.lineCap='round';
+  for(let i=0;i<6;i++){ctx.save();ctx.rotate(i*Math.PI/3);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-70);ctx.moveTo(0,-42);ctx.lineTo(-18,-58);ctx.moveTo(0,-42);ctx.lineTo(18,-58);ctx.stroke();ctx.restore();}ctx.restore();}
+function coin(x,y,r,label='₩'){ctx.fillStyle=C.yellow;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();ctx.strokeStyle=C.yellowD;ctx.lineWidth=r*.12;ctx.beginPath();ctx.arc(x,y,r*.78,0,7);ctx.stroke();
+  txt(label,x,y+r*.32,{w:900,size:r*.9,color:C.yellowD,align:'center'});}
+function megaphone(x,y,s,t){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.rotate(-.2);ctx.fillStyle=C.fg;
+  ctx.beginPath();ctx.moveTo(-60,-30);ctx.lineTo(50,-80);ctx.lineTo(50,80);ctx.lineTo(-60,30);ctx.closePath();ctx.fill();rr(-90,-30,34,60,8);ctx.fill();
+  ctx.fillStyle=C.red;rr(-60,30,30,60,8);ctx.fill();ctx.strokeStyle=C.yellow;ctx.lineWidth=8;ctx.lineCap='round';
+  for(let i=0;i<3;i++){const a=(t*2+i/3)%1;ctx.globalAlpha=1-a;ctx.beginPath();ctx.arc(60,0,40+a*80,-.6,.6);ctx.stroke();}ctx.restore();}
+function gear(x,y,r,rot,color=C.muted){ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.fillStyle=color;
+  for(let i=0;i<10;i++){ctx.save();ctx.rotate(i*Math.PI/5);rr(-r*.16,-r*1.18,r*.32,r*.4,4);ctx.fill();ctx.restore();}
+  ctx.beginPath();ctx.arc(0,0,r*.9,0,7);ctx.fill();ctx.fillStyle=C.bg2;ctx.beginPath();ctx.arc(0,0,r*.35,0,7);ctx.fill();ctx.restore();}
+function ship(x,y,s,t){ctx.save();ctx.translate(x,y+Math.sin(t*2)*6);ctx.scale(s,s);
+  const cols=[C.orange,C.blue,C.green,C.red,C.yellow];for(let i=0;i<5;i++){ctx.fillStyle=cols[i];rr(-150+i*62,-90,56,46,4);ctx.fill();}
+  for(let i=0;i<3;i++){ctx.fillStyle=cols[(i+2)%5];rr(-88+i*62,-140,56,46,4);ctx.fill();}
+  ctx.fillStyle=C.fg;ctx.beginPath();ctx.moveTo(-200,-40);ctx.lineTo(200,-40);ctx.lineTo(160,30);ctx.lineTo(-170,30);ctx.closePath();ctx.fill();
+  ctx.strokeStyle=C.blue;ctx.lineWidth=6;ctx.beginPath();for(let k=-240;k<=240;k+=20)ctx.lineTo(k,48+Math.sin(k*.05+t*4)*6);ctx.stroke();ctx.restore();}
+function bookmark(x,y,s,color=C.yellow){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle=color;
+  ctx.beginPath();ctx.moveTo(-14,-20);ctx.lineTo(14,-20);ctx.lineTo(14,22);ctx.lineTo(0,10);ctx.lineTo(-14,22);ctx.closePath();ctx.fill();ctx.restore();}
+function commentIcon(x,y,s,color=C.yellow){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle=color;rr(-34,-26,68,46,14);ctx.fill();
+  ctx.beginPath();ctx.moveTo(-14,18);ctx.lineTo(-22,34);ctx.lineTo(2,18);ctx.closePath();ctx.fill();
+  ctx.fillStyle=C.ink;[-14,0,14].forEach(dx=>{ctx.beginPath();ctx.arc(dx,-3,5,0,7);ctx.fill();});ctx.restore();}
+function lockIcon(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.strokeStyle='#fff';ctx.lineWidth=12;ctx.beginPath();ctx.arc(0,-20,30,Math.PI,0);ctx.stroke();
+  ctx.fillStyle='#fff';rr(-46,-20,92,70,12);ctx.fill();ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(0,10,10,0,7);ctx.fill();ctx.restore();}
+function govIcon(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle=C.fg;ctx.beginPath();ctx.moveTo(-70,-30);ctx.lineTo(0,-70);ctx.lineTo(70,-30);ctx.closePath();ctx.fill();
+  for(let i=0;i<4;i++)rr(-56+i*36,-24,20,64,3),ctx.fill();rr(-78,42,156,16,4);ctx.fill();ctx.restore();}
+function personIcon(x,y,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y-r*.9,r*.55,0,7);ctx.fill();ctx.beginPath();ctx.ellipse(x,y+r*.55,r*.95,r*.75,0,Math.PI,0);ctx.fill();}
+
+/* ---------- characters + speech ---------- */
+function bubble(cx,cy,lines,p,{size=42,w=700,tail=[0,0],fill=C.paper,color=C.ink,think=false,weight=700,lh=1.42}={}){
+  if(p<=0)return;const s=pop(p);
+  font(weight,size);let mw=0;lines.forEach(l=>mw=Math.max(mw,ctx.measureText(l).width));
+  const bw=Math.min(w,mw+90),bh=lines.length*size*lh+60;
+  ctx.save();ctx.translate(cx,cy);ctx.scale(s,s);ctx.globalAlpha*=clamp(p*3);
+  ctx.shadowColor='rgba(30,40,56,.16)';ctx.shadowBlur=24;ctx.shadowOffsetY=10;
+  ctx.fillStyle=fill;ctx.strokeStyle=C.ink;ctx.lineWidth=4;
+  rr(-bw/2,-bh/2,bw,bh,bh>140?44:bh/2);ctx.fill();ctx.shadowColor='transparent';ctx.stroke();
+  const [tx,ty]=tail;
+  if(think){[[.85,16],[1.08,10]].forEach(([k,r])=>{ctx.beginPath();ctx.arc(tx*k,ty*k,r,0,7);ctx.fill();ctx.stroke();});}
+  else if(tx||ty){const ex=clamp(tx,-bw/2+50,bw/2-50),ey=ty>0?bh/2-4:-bh/2+4;
+    ctx.beginPath();ctx.moveTo(ex-24,ey);ctx.lineTo(tx,ty);ctx.lineTo(ex+24,ey);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.moveTo(ex-24,ey);ctx.lineTo(tx,ty);ctx.lineTo(ex+24,ey);ctx.stroke();
+    ctx.fillRect(ex-22,ey-(ty>0?8:-2),44,6);}
+  ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';
+  lines.forEach((l,i)=>ctx.fillText(l,0,-bh/2+30+size*lh*(i+.5)));
+  ctx.restore();}
+function person(x,y,s,o={}){
+  const {top=C.olive,hair='bob',mood='flat',look=0,glasses=false,tie=null,blink=false,shirt='#FFFCF2',cut=1e4,
+    talk=0,nod=0,arm=null,t=0}=o;
+  ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.beginPath();ctx.rect(-400,-400,800,400+cut);ctx.clip();
+  const br=1+Math.sin(t*2.3)*.012; // breathing
+  // back hair
+  ctx.save();ctx.translate(0,nod);
+  ctx.fillStyle=C.hair;
+  if(hair==='bob'){ctx.beginPath();ctx.ellipse(0,8,92,96,0,0,7);ctx.fill();rr(-92,0,184,90,40);ctx.fill();}
+  ctx.restore();
+  // body
+  ctx.save();ctx.translate(0,95);ctx.scale(1,br);ctx.translate(0,-95);
+  ctx.fillStyle=top;rr(-150,95,300,320,[120,120,30,30]);ctx.fill();
+  ctx.fillStyle=shirt;ctx.beginPath();ctx.moveTo(-48,95);ctx.lineTo(48,95);ctx.lineTo(0,215);ctx.closePath();ctx.fill();
+  if(tie){ctx.fillStyle=tie;ctx.beginPath();ctx.moveTo(-12,108);ctx.lineTo(12,108);ctx.lineTo(18,200);ctx.lineTo(0,222);ctx.lineTo(-18,200);ctx.closePath();ctx.fill();}
+  else{ctx.strokeStyle=C.navy;ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(-40,100);ctx.lineTo(0,235);ctx.lineTo(40,100);ctx.stroke();
+    ctx.fillStyle='#fff';rr(-26,232,52,64,8);ctx.fill();ctx.strokeStyle=C.navy;ctx.lineWidth=4;ctx.stroke();}
+  ctx.strokeStyle='rgba(0,0,0,.18)';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-50,98);ctx.lineTo(-8,230);ctx.moveTo(50,98);ctx.lineTo(8,230);ctx.stroke();
+  ctx.restore();
+  // neck
+  ctx.fillStyle=C.skinS;rr(-22,55,44,52,10);ctx.fill();
+  // head group
+  ctx.save();ctx.translate(0,nod);ctx.rotate(nod*.004);
+  ctx.fillStyle=C.skin;ctx.beginPath();ctx.ellipse(0,0,70,80,0,0,7);ctx.fill();
+  ctx.beginPath();ctx.ellipse(-70,8,12,18,0,0,7);ctx.ellipse(70,8,12,18,0,0,7);ctx.fill();
+  ctx.fillStyle=C.hair;
+  if(hair==='bob'){ctx.beginPath();ctx.moveTo(-82,40);ctx.quadraticCurveTo(-95,-80,0,-88);ctx.quadraticCurveTo(95,-80,82,40);
+    ctx.quadraticCurveTo(70,-20,30,-40);ctx.quadraticCurveTo(-10,-20,-50,-30);ctx.quadraticCurveTo(-70,-10,-82,40);ctx.fill();}
+  else{ctx.beginPath();ctx.moveTo(-74,0);ctx.quadraticCurveTo(-82,-92,0,-92);ctx.quadraticCurveTo(84,-92,74,0);
+    ctx.quadraticCurveTo(66,-40,20,-44);ctx.quadraticCurveTo(-30,-30,-60,-40);ctx.quadraticCurveTo(-72,-24,-74,0);ctx.fill();}
+  const ex=look*10;ctx.fillStyle=C.ink;
+  if(blink){ctx.fillRect(-36+ex,10,22,4);ctx.fillRect(14+ex,10,22,4);}
+  else{ctx.beginPath();ctx.ellipse(-25+ex,12,8,11,0,0,7);ctx.ellipse(25+ex,12,8,11,0,0,7);ctx.fill();
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-22+ex,8,2.6,0,7);ctx.arc(28+ex,8,2.6,0,7);ctx.fill();}
+  ctx.strokeStyle=C.hair;ctx.lineWidth=6;ctx.lineCap='round';ctx.beginPath();
+  if(mood==='sad'||mood==='worry'){ctx.moveTo(-40,-14);ctx.lineTo(-14,-22);ctx.moveTo(40,-14);ctx.lineTo(14,-22);}
+  else{ctx.moveTo(-40,-16);ctx.lineTo(-12,-18);ctx.moveTo(40,-16);ctx.lineTo(12,-18);}
+  ctx.stroke();
+  if(glasses){ctx.strokeStyle='#222';ctx.lineWidth=4;ctx.beginPath();ctx.roundRect(-48+ex,-4,40,32,9);ctx.roundRect(8+ex,-4,40,32,9);
+    ctx.moveTo(-8+ex,8);ctx.lineTo(8+ex,8);ctx.stroke();}
+  // mouth
+  if(talk>.05){ctx.fillStyle='#7A3B30';ctx.beginPath();ctx.ellipse(0,46,12+3*talk,3+12*talk,0,0,7);ctx.fill();
+    if(talk>.4){ctx.fillStyle='#E07A6E';ctx.beginPath();ctx.ellipse(0,46+8*talk,8,3*talk,0,0,7);ctx.fill();}}
+  else{ctx.strokeStyle='#8A4B3B';ctx.lineWidth=5;ctx.beginPath();
+    if(mood==='smile'){ctx.arc(0,36,16,.15*Math.PI,.85*Math.PI);}
+    else if(mood==='sad'){ctx.arc(0,56,13,1.2*Math.PI,1.8*Math.PI);}
+    else if(mood==='worry'){ctx.moveTo(-12,48);ctx.quadraticCurveTo(0,42,12,48);}
+    else{ctx.moveTo(-11,46);ctx.lineTo(11,46);}
+    ctx.stroke();}
+  ctx.fillStyle='rgba(230,140,120,.25)';ctx.beginPath();ctx.ellipse(-44,34,12,7,0,0,7);ctx.ellipse(44,34,12,7,0,0,7);ctx.fill();
+  ctx.restore();
+  // gesturing arm (right side of the image)
+  if(arm!==null){ctx.save();ctx.translate(118,150);ctx.rotate(arm);ctx.fillStyle=top;rr(-30,-10,60,170,30);ctx.fill();
+    ctx.fillStyle=shirt;rr(-30,140,60,22,8);ctx.fill();
+    // open palm facing the viewer, kept upright at any arm angle (a closed hand read as thumbs-down)
+    ctx.translate(0,178);ctx.rotate(-arm+Math.sin(t*3.2)*.12);ctx.fillStyle=C.skin;rr(-28,-34,56,58,16);ctx.fill();
+    [[-21,-80,13,52],[-7,-90,13,62],[7,-88,13,60],[21,-76,12,48]].forEach(([fx,fy,fw,fh])=>{rr(fx-fw/2,fy,fw,fh,fw/2);ctx.fill();});
+    ctx.save();ctx.translate(-30,-6);ctx.rotate(-.9);rr(-7,-34,14,40,7);ctx.fill();ctx.restore();ctx.restore();}
+  ctx.restore();}
+// the channel's lawyer: talk = mouth 0..1 (use flap()), arm = gesture angle (e.g. lerp(.2,-2.15,p)) or null
+function lawyer(x,y,s,o={}){person(x,y,s,{top:C.navy,hair:'short',glasses:true,tie:'#2F5FA8',mood:'smile',shirt:'#fff',...o});}
+function flap(t,a,b){if(t<a||t>b)return 0;return Math.abs(Math.sin((t-a)*13))*(.55+.45*Math.sin(t*5.3));}
+function nodv(t,a){const p=P(t,a,a+.6);return Math.sin(p*Math.PI*2)*6*(1-p);}
+function tag(x,y,label,p,bg=C.navy,fg='#fff'){if(p<=0)return;const a=eo(p);font(800,40);const w=ctx.measureText(label).width+56;
+  ctx.save();ctx.globalAlpha*=a;ctx.translate(x-(1-a)*60,y);ctx.fillStyle=bg;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(w,0);ctx.lineTo(w-14,70);ctx.lineTo(0,70);ctx.closePath();ctx.fill();
+  ctx.fillStyle=fg;ctx.textBaseline='middle';ctx.fillText(label,26,37);ctx.restore();}
+// headline: lines pop in at the given start times
+function headline(lines,t,starts,{y=330,size=86,hlc=C.yellow}={}){
+  lines.forEach((l,i)=>{const t0=starts[i];const p=P(t,t0,t0+.4);if(p<=0)return;const s=lerp(1.25,1,eb(p));
+    const w=tw(l,900,size,-2),x=W/2,yy=y+i*size*1.25;
+    ctx.save();ctx.globalAlpha*=clamp(p*2.5);ctx.translate(x,yy);ctx.scale(s,s);ctx.translate(-x,-yy);
+    hl(x-w/2-14,yy-size*.38,w+28,size*.48,P(t,t0+.2,t0+.6),hlc);
+    txt(l,x,yy,{w:900,size,align:'center',ls:-2});ctx.restore();});}
+
+/* item header: giant outlined number + title (+ sub line, + effective-date chip) */
+function itemHead(t,n,title,t0,tTitle,{sub=null,tSub=0,eff=null}={}){
+  const p=P(t,t0,t0+.35);if(p<=0)return;
+  const num=String(n).padStart(2,'0'),nw=tw(num,900,140);
+  ctx.save();ctx.globalAlpha=clamp(p*2);const s=lerp(1.6,1,eo(p));
+  ctx.translate(90+nw/2,310);ctx.scale(s,s);
+  font(900,140);ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=5;ctx.strokeStyle=CONFIG.theme==='paper'?C.yellowD:C.yellow;ctx.strokeText(num,0,0);
+  ctx.restore();
+  const tx=90+nw+34;
+  const p2=P(t,tTitle,tTitle+.35);if(p2>0){const r=rise(p2,30);txt(title,tx,sub?312:336+0,{w:900,size:62,alpha:r.a,ls:-1});}
+  if(sub){const p3=P(t,tSub,tSub+.35);if(p3>0){const r=rise(p3,20);txt(sub,tx+2,362+r.y,{w:700,size:30,color:C.muted,alpha:r.a});}}
+  const hp=clamp(P(t,t0+.2,t0+.6));
+  if(eff){const p4=P(t,t0+.3,t0+.7);hazard(90,404,560,10,t*60,hp);
+    if(p4>0){ctx.save();ctx.globalAlpha=eo(p4);chip(990,409,eff,{bg:'rgba(255,198,41,.16)',fg:CONFIG.theme==='paper'?C.yellowD:C.yellow,size:28,align:'right',padX:20});ctx.restore();}}
+  else hazard(90,404,900,10,t*60,hp);
+}
+
+
+/* ---------- background + header ---------- */
+function bg(t){
+  if(CONFIG.theme==='dark'){const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0F131A');g.addColorStop(1,'#151B25');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle=C.grid;ctx.lineWidth=2;const o=(t*10)%80;
+    for(let x=0;x<=W;x+=80){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=-o;y<=H;y+=80){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}}
+  else{ctx.fillStyle=C.bg;ctx.fillRect(0,0,W,H);const o=(t*12)%60;ctx.fillStyle=C.grid;
+    for(let y=40-o;y<H+60;y+=60)for(let x=40;x<W;x+=60){ctx.beginPath();ctx.arc(x,y,2.4,0,7);ctx.fill();}}}
+// item = 1..CONFIG.items highlights that chip; -1 shows only the series line
+function header(T,item){if(CONFIG.series)txt(CONFIG.series,W/2,104,{w:800,size:28,color:C.muted,align:'center',ls:2});
+  if(item<0||!CONFIG.items)return;const n=CONFIG.items,gap=Math.min(96,800/n),x0=W/2-gap*(n-1)/2;
+  for(let i=0;i<n;i++){const on=i+1===item,done=i+1<item;ctx.fillStyle=on?C.yellow:done?C.yellow+'59':C.fg+'14';
+    ctx.beginPath();ctx.arc(x0+i*gap,150,on?24:19,0,7);ctx.fill();txt(String(i+1),x0+i*gap,161,{w:900,size:on?28:22,color:on||done?C.ink:C.muted,align:'center'});
+    if(i<n-1){ctx.fillStyle=done||on?C.yellow+'59':C.fg+'14';ctx.fillRect(x0+i*gap+26,148,gap-52,4);}}}
+
+/* ---------- closing scenes (silent, last scene): S.push(ending(CONFIG.ending,{q:['line 1','line 2']})) ----------
+   'wave'   lawyer waves with an open palm, brand pill, question card; the loop wipe follows
+   'seal'   lawyer pops up and slams the channel seal onto the screen (shake, ink), question card; the loop wipe follows
+   'tablet' the camera pulls back: the video was playing on the lawyer's tablet; question card + brand; the tablet
+            swipes to frame 0 and the camera pushes back in, so the last frame equals the first (no wipe needed)
+   new_project.py picks CONFIG.ending at random, rotating through all three before repeating. */
+const SEAL_RED='#C8372D';
+const BRAND=CONFIG.brand.split('|').map(x=>x.trim()).filter(Boolean);   // ['상생의 노동법','박재우 변호사']
+function brandPill(x,y,p){if(p<=0)return;const dk=CONFIG.theme==='dark';withT(x,y,pop(p),1,()=>{ctx.fillStyle=dk?C.yellow:C.navy;rr(-380,-60,760,120,60);ctx.fill();
+  txt(CONFIG.brand,0,14,{w:900,size:40,color:dk?C.ink:'#fff',align:'center'});});}
+function questionCard(x,y,q,p){if(p<=0)return;withT(x,y,pop(p),1,()=>{panel(-470,-92,940,184,{fill:C.panel,stroke:C.yellowD});commentIcon(-392,-4,1.15,C.yellowD);
+  if(q.length>1){txt(q[0],-320,-14,{w:800,size:42});txt(q[1],-320,46,{w:900,size:42,color:CONFIG.theme==='dark'?C.yellow:C.navy});}
+  else txt(q[0],-320,16,{w:800,size:42});});}
+function sealMark(x,y,p){if(p<=0)return;const k=lerp(1.22,1,eo(clamp(p*2.5)));withT(x,y,k,1,()=>{ctx.rotate(-.07);
+  ctx.strokeStyle=SEAL_RED;ctx.lineWidth=12;rr(-170,-170,340,340,26);ctx.stroke();ctx.lineWidth=4;rr(-147,-147,294,294,16);ctx.stroke();
+  ctx.fillStyle=SEAL_RED;ctx.textAlign='center';ctx.textBaseline='middle';const top=(BRAND[0]||'').split(' ').slice(0,2);
+  font(900,top.length>1?80:96);top.forEach((l,i)=>ctx.fillText(l,0,top.length>1?-84+i*92:-38));
+  ctx.fillRect(-118,62,236,5);font(900,40);ctx.fillText(BRAND[1]||'',0,110);
+  ctx.fillStyle=C.bg;for(let i=0;i<54;i++){const a=Math.sin(i*12.9898)*43758.5453,b=Math.sin(i*78.233)*12345.678,fa=a-Math.floor(a),fb=b-Math.floor(b);
+    ctx.beginPath();ctx.arc(fa*330-165,fb*330-165,1.5+((fa*7)%1)*3.2,0,7);ctx.fill();}});}   // worn-ink speckles
+function inkSplat(x,y,p){if(p<=0)return;ctx.save();ctx.fillStyle=SEAL_RED;const q=eo(clamp(p));
+  for(let i=0;i<14;i++){const ang=i*2.399+.4,d=lerp(170,215+(i%4)*32,q),r=5+(i*7)%11;ctx.beginPath();ctx.arc(x+Math.cos(ang)*d,y+Math.sin(ang)*d,r*lerp(1.4,1,q),0,7);ctx.fill();}
+  ctx.restore();}
+function sealTool(x,y,s,rot=0,a=1){if(a<=0)return;ctx.save();ctx.globalAlpha*=a;ctx.translate(x,y);ctx.rotate(rot);ctx.scale(s,s);   // face bottom at (0,0)
+  ctx.fillStyle=SEAL_RED;rr(-74,-26,148,26,6);ctx.fill();
+  ctx.fillStyle='#8A5A34';rr(-62,-112,124,90,14);ctx.fill();ctx.fillStyle='rgba(0,0,0,.16)';rr(30,-112,32,90,[0,14,14,0]);ctx.fill();
+  ctx.fillStyle='#6E4526';rr(-22,-150,44,44,8);ctx.fill();
+  ctx.fillStyle='#8A5A34';ctx.beginPath();ctx.arc(0,-178,40,0,7);ctx.fill();ctx.fillStyle='rgba(255,255,255,.28)';ctx.beginPath();ctx.arc(-13,-190,12,0,7);ctx.fill();
+  ctx.restore();}
+const ENDINGS={
+  wave:q=>({f(t){
+    const p=P(t,0,.4),r=rise(p,60);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    ctx.fillStyle=C.yellow+'26';ctx.beginPath();ctx.arc(540,820,330+Math.sin(t*1.4)*8,0,7);ctx.fill();
+    lawyer(540,720,1.05,{t,arm:lerp(.2,-2.15,eo(P(t,.1,.6)))+Math.sin(t*3)*.1,cut:300,blink:(t%3)>2.9});
+    ctx.fillStyle=C.line;rr(70,1060,940,40,10);ctx.fill();ctx.restore();
+    brandPill(540,1390,P(t,.3,.7));questionCard(540,1222,q,P(t,1.1,1.45));
+  },sfx:()=>[['rise',0],['pop',.3],['pop',1.1]]}),
+  seal:q=>({f(t){
+    const HIT=1.25,DESK=1000,MX=540,MY=1245;
+    const sh=t>HIT?Math.sin((t-HIT)*72)*28*Math.exp(-(t-HIT)*7):0;   // impact shake
+    ctx.save();ctx.translate(sh,sh*.55);
+    ctx.fillStyle=C.yellow+'26';ctx.beginPath();ctx.arc(540,720,310*eo(P(t,.1,.6))+Math.sin(t*1.4)*8,0,7);ctx.fill();
+    const hy=lerp(1320,600,eb(P(t,.12,.62)));
+    const arm=t<.85?lerp(.2,-2.3,eo(P(t,.45,.85))):t<1?lerp(-2.3,-2.6,eo(P(t,.85,1))):t<1.4?lerp(-2.6,-1.2,eio(P(t,1,1.2))):lerp(-1.2,-2.15,eo(P(t,1.4,1.75)))+Math.sin((t-1.75)*3)*.1*P(t,1.75,2.1);
+    ctx.save();ctx.beginPath();ctx.rect(0,0,W,DESK);ctx.clip();
+    lawyer(540,hy,1,{t,arm,cut:DESK-hy,blink:(t%3)>2.9,nod:nodv(t,HIT+.1)});
+    const palm=a=>[540+118-178*Math.sin(a),hy+150+178*Math.cos(a)];
+    if(t<1){const [px,py]=palm(arm);sealTool(px,py+22,.7);}
+    ctx.restore();
+    ctx.fillStyle=C.line;rr(70,DESK,940,40,10);ctx.fill();
+    inkSplat(MX,MY,P(t,HIT,HIT+.22));sealMark(MX,MY,P(t,HIT,HIT+.15));burst(MX,MY,P(t,HIT,HIT+.4),SEAL_RED,215,300,12);
+    if(t>=1&&t<1.75){const [hx,hy0]=palm(-2.6);   // flying seal → impact → lift away
+      if(t<HIT){const f=Math.pow(P(t,1,HIT),2);sealTool(lerp(hx,MX,f),lerp(hy0+22,MY+170,f),lerp(.7,2.4,f),lerp(.25,0,f));}
+      else{const l=eio(P(t,HIT+.08,1.7));sealTool(MX,MY+170-560*l,2.4+.5*l,0,1-l);}}
+    ctx.restore();
+    questionCard(540,1550,q,P(t,2.3,2.65));
+  },sfx:()=>[['rise',.1],['swoosh',.45],['whoosh',.98],['thud',1.25],['stamp',1.25],['pop',2.3]]}),
+  tablet:q=>({full:true,f(t){   // draws in screen coordinates (no safeScale, no header/captions)
+    const TX=360,TY=790,TW=360,TH=640,CX=TX+TW/2,CY=TY+TH/2,Z=W/TW,dk=CONFIG.theme==='dark';
+    const u=eio(P(t,.25,1.25))*(1-eio(P(t,4.1,4.9)));   // 0 = tablet screen fills the frame, 1 = pulled back
+    const z=Math.pow(Z,1-u),k=(Z-z)/(Z-1);
+    ctx.save();ctx.translate(540,lerp(960,CY,k));ctx.scale(z,z);ctx.translate(-CX,-CY);
+    ctx.fillStyle=C.yellow+'26';ctx.beginPath();ctx.arc(540,760,300+Math.sin(t*1.4)*8,0,7);ctx.fill();
+    questionCard(540,380,q,P(t,1.5,1.85));
+    lawyer(540,610,.85,{t,blink:(t%3)>2.9,nod:nodv(t,1.3)+nodv(t,3.75)});
+    ctx.strokeStyle=C.navy;ctx.lineWidth=56;ctx.lineCap='round';   // arms reaching to the tablet sides
+    [-1,1].forEach(sd=>{ctx.beginPath();ctx.moveTo(540+sd*105,735);ctx.quadraticCurveTo(540+sd*240,850,540+sd*(TW/2+40),1100);ctx.stroke();});
+    ctx.save();ctx.shadowColor='rgba(0,0,0,.28)';ctx.shadowBlur=40;ctx.shadowOffsetY=18;ctx.fillStyle=dk?'#323C4D':'#1E2838';rr(TX-24,TY-24,TW+48,TH+48,40);ctx.fill();ctx.restore();
+    ctx.fillStyle=dk?'#4A5568':'#3A475C';ctx.beginPath();ctx.arc(CX,TY-12,4,0,7);ctx.fill();
+    ctx.save();rr(TX,TY,TW,TH,12*u);ctx.clip();ctx.imageSmoothingQuality='high';
+    const sw=eio(P(t,3.3,3.65));   // swipe up inside the tablet: last frame → frame 0
+    if(sw<1)ctx.drawImage(CAP.last,TX,TY-TH*sw,TW,TH);
+    if(sw>0)ctx.drawImage(CAP.first,TX,TY+TH*(1-sw),TW,TH);
+    ctx.restore();
+    [-1,1].forEach(sd=>{const hx=sd<0?TX-24:TX+TW+24;ctx.fillStyle=C.skin;   // thumbs stay on the bezel so the push-in ends on a clean frame
+      rr(hx+(sd<0?-46:2),1050,44,110,22);ctx.fill();rr(hx+(sd<0?-8:-14),1068,22,52,11);ctx.fill();});
+    const fp=P(t,3.15,3.75);if(fp>0&&fp<1){const fy=lerp(TY+TH*.78,TY+TH*.3,eio(P(t,3.3,3.65)));ctx.save();ctx.globalAlpha=Math.sin(fp*Math.PI)*.85;   // fingertip swipe hint
+      ctx.fillStyle='rgba(255,255,255,.9)';ctx.beginPath();ctx.arc(CX+56,fy,24,0,7);ctx.fill();ctx.strokeStyle='rgba(30,40,56,.35)';ctx.lineWidth=4;ctx.stroke();ctx.restore();}
+    brandPill(540,1545,P(t,1.9,2.25));   // brand below the tablet (caption band, clear of the Shorts UI)
+    ctx.restore();
+  },sfx:()=>[['swoosh',.25],['pop',1.5],['pop',1.9],['tick',3.25],['swoosh',3.3],['whoosh',4.1]]})};
+function ending(kind,{q=['여러분 회사는','어떻게 하고 있나요?'],min=5}={}){const mk=ENDINGS[kind]||ENDINGS.wave;return {item:-1,lead:0,tail:0,min,noCap:true,...mk(q)};}
+let CAP=null;   // full-frame captures for the 'tablet' ending: frame 0 and the frame just before the last scene
+function captureFrames(){const g=T=>{renderFrame(T);const c=new OffscreenCanvas(W,H);c.getContext('2d').drawImage(main,0,0);return c;};CAP={first:g(0),last:g(S[S.length-1].s-1e-3)};}
+
+/* =====================================================================================
+   SCENES — one entry per narration clip (same order as script.json).
+   f(t,e): t = scene-local seconds. Time every cue to a spoken word:
+     e.w('장소')      start of the first word beginning with '장소'   e.w('두',1) = second match
+     e.we('장소')     end of that word                                e.end = end of narration
+   A missing word throws; the error is printed by render.js (fix the prefix, never guess times).
+   Fields: item (header chip, -1 none) · lead (s before narration starts) · tail (s after) ·
+           min (minimum scene length) · noCap (hide captions) · sfx(e) → [[kind, t, dur?], ...]
+   Last scene: S.push(ending(CONFIG.ending,{q:[question lines]})) — silent closing, no script line for it.
+   The demo below matches assets/demo_script.json — replace it with the real scenes.
+   ===================================================================================== */
+const S=[];
+// map a design-space point to the screen (for iris centres)
+const toScr=(x,y)=>[540*(1-CONFIG.safeScale)+x*CONFIG.safeScale,90-120*CONFIG.safeScale+y*CONFIG.safeScale];
+// ---- small icons for this video ----
+function docIcon(x,y,s,label,{alpha=1}={}){ctx.save();ctx.globalAlpha*=alpha;ctx.translate(x,y);ctx.scale(s,s);
+  ctx.fillStyle='#F3F5F8';rr(-70,-90,140,180,14);ctx.fill();ctx.fillStyle='#D5DBE4';ctx.beginPath();ctx.moveTo(30,-90);ctx.lineTo(70,-50);ctx.lineTo(30,-50);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#9AA4B2';for(let i=0;i<4;i++){rr(-46,-28+i*28,i===3?56:92,9,4);ctx.fill();}
+  if(label){font(900,26);ctx.fillStyle=C.navy;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,-6,-62);}ctx.restore();}
+function scaleIcon(x,y,s,color=C.yellow){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=8;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(0,-50);ctx.lineTo(0,50);ctx.moveTo(-60,-34);ctx.lineTo(60,-34);ctx.moveTo(-30,56);ctx.lineTo(30,56);ctx.stroke();
+  [-60,60].forEach(dx=>{ctx.beginPath();ctx.moveTo(dx-26,6);ctx.lineTo(dx,-34);ctx.lineTo(dx+26,6);ctx.stroke();ctx.beginPath();ctx.arc(dx,6,26,0,Math.PI);ctx.fill();});
+  ctx.beginPath();ctx.arc(0,-50,9,0,7);ctx.fill();ctx.restore();}
+function xMark(x,y,s,p,color=C.red){if(p<=0)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=12*s;ctx.lineCap='round';const d=30*s,a=eo(clamp(p*2)),b=eo(clamp(p*2-1));
+  ctx.beginPath();ctx.moveTo(x-d,y-d);ctx.lineTo(x-d+2*d*a,y-d+2*d*a);if(b>0){ctx.moveTo(x+d,y-d);ctx.lineTo(x+d-2*d*b,y-d+2*d*b);}ctx.stroke();ctx.restore();}
+function strike(x,y,w,p,color=C.red){if(p<=0)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=8;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+w*eo(p),y);ctx.stroke();ctx.restore();}
+function rowCheck(x,y,label,p,{size=42,w=820,color=C.fg,sub=null}={}){if(p<=0)return;const r=rise(p,20);ctx.save();ctx.globalAlpha*=r.a;ctx.translate(0,r.y);
+  ctx.fillStyle=C.fg+'10';rr(x,y-50,w,sub?112:100,18);ctx.fill();checkMark(x+52,y,1,P(p,.3,1));txt(label,x+100,y+14,{w:900,size,color});
+  if(sub)txt(sub,x+100,y+52,{w:700,size:28,color:C.muted});ctx.restore();}
+
+// 1. Hook — the change and the question, readable from frame 0
+S.push({item:-1,lead:.1,tail:.5,f(t,e){
+  hazard(0,250,1080,30,t*80,1);hazard(0,1640,1080,30,-t*80,1);
+  const p0=P(t,-.2,.1);
+  withT(540,430,pop(p0),clamp(p0*2),()=>chip(0,0,'10. 2. 시행',{bg:C.red,fg:'#fff',size:44,w:900,padX:34}));
+  withT(540,610,lerp(1.3,1,eo(p0)),clamp(p0*2),()=>txt('노동감독관',0,0,{w:900,size:120,align:'center',ls:-3}));
+  const w2=tw('직접 수사',900,130,-3);
+  withT(540,780,lerp(1.3,1,eo(p0)),clamp(p0*2),()=>{hl(-w2/2-16,-50,w2+32,60,P(t,e.w('직접')-.3,e.w('직접')+.2));txt('직접 수사',0,0,{w:900,size:130,align:'center',ls:-3});});
+  const pk=P(t,e.w('검사의')-.15,e.w('검사의')+.2);
+  if(pk>0){const r=rise(pk,24);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    txt('검사 수사지휘',540,960,{w:800,size:58,color:C.muted,align:'center'});
+    const ws=tw('검사 수사지휘',800,58);strike(540-ws/2-14,940,ws+28,P(t,e.w('없이')-.05,e.w('없이')+.3));ctx.restore();}
+  const pc=P(t,e.w('기업은')-.15,e.w('기업은')+.25);
+  if(pc>0){const r=rise(pc,40);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);building(120,1180,340,300,'우리 회사');ctx.restore();}
+  bubble(730,1240,['무엇을','준비해야 할까?'],P(t,e.w('무엇을')-.1,e.w('무엇을')+.3),{size:50,tail:[-250,150]});
+},sfx:e=>[['thud',0],['tick',e.w('검사의')-.15],['scribble',e.w('없이')-.05],['pop',e.w('기업은')-.15],['pop',e.w('무엇을')-.1]]});
+
+// 2. What changed — prosecution office split, command clause replaced, four case types now investigated directly
+S.push({item:-1,lead:.3,tail:.55,f(t,e){
+  headline(['무엇이 바뀌었나'],t,[-.1],{y:320,size:72});
+  const p1=P(t,-.1,.25);if(p1>0){const r=rise(p1,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,440,940,290);building(110,490,300,200,'검찰청',{accent:C.muted});
+    chip(260,452,'78년 만에',{bg:C.red,fg:'#fff',size:28,w:900,padX:18});
+    stamp(260,570,'폐지',P(t,e.w('닫던')-.05,e.w('닫던')+.2),{size:54});
+    const pa=P(t,e.w('날,')-.1,e.w('날,')+.3);
+    arrow(420,585,500,522,pa,{wd:8,head:20});arrow(420,600,500,660,pa,{wd:8,head:20});
+    [['공소청','기소',522],['중대범죄수사청','중대범죄 수사',660]].forEach(([a,b,y],i)=>{const pp=P(t,e.w('날,')+i*.15,e.w('날,')+.3+i*.15);if(pp<=0)return;
+      ctx.save();ctx.globalAlpha*=eo(pp);ctx.fillStyle=C.panel2;rr(510,y-50,470,100,18);ctx.fill();txt(a,540,y+14,{w:900,size:40});
+      chip(960,y,b,{bg:C.yellow+'26',fg:C.yellow,size:28,align:'right',padX:16});ctx.restore();});
+    ctx.restore();}
+  const p2=P(t,e.w('개정')-.2,e.w('개정')+.2);if(p2>0){const r=rise(p2,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,770,940,280,{glow:P(t,e.w('없앴습니다'),e.w('없앴습니다')+.3)*(1-P(t,e.w('이제'),e.w('이제')+.4))});
+    txt('개정 형사소송법',110,840,{w:900,size:40});chip(970,826,'제245조의10 ②③',{bg:C.panel2,fg:C.muted,size:26,align:'right',padX:16});
+    const pr=P(t,e.w('검사의')-.1,e.w('검사의')+.25);if(pr>0){txt('검사의 수사지휘',110,930,{w:900,size:52,alpha:eo(pr)});
+      strike(100,912,tw('검사의 수사지휘',900,52)+20,P(t,e.w('없앴습니다')-.1,e.w('없앴습니다')+.3));xMark(560,912,.8,P(t,e.w('없앴습니다'),e.w('없앴습니다')+.35));}
+    const pn=P(t,e.w('없앴습니다')+.35,e.w('없앴습니다')+.7);if(pn>0)txt('→ 상호 협력 · 지도·조언',110,1010,{w:900,size:44,color:C.green,alpha:eo(pn)});
+    ctx.restore();}
+  const tiles=[['임금체불','임금체불,'],['산업재해','산업재해,'],['부당노동행위','부당노동행위,'],['불법파견','불법파견']];
+  tiles.forEach(([lb,wd],i)=>{const ti=e.w(wd),p=P(t,ti-.15,ti+.2);if(p<=0)return;const x=70+i*241;
+    withT(x+107,1190,pop(p),1,()=>{panel(-107,-95,215,190,{r:22,glow:P(t,ti,ti+.25)*(1-P(t,ti+.5,ti+.9))});
+      if(i===0)coin(0,-28,34);else if(i===1)worker(0,-40,.3);else if(i===2)megaphone(0,-28,.55,t);else{personIcon(-24,-24,26,C.blue);personIcon(26,-24,26,C.muted);}
+      txt(lb,0,62,{w:900,size:32,align:'center'});});});
+  const pb=P(t,e.w('감독관이')-.2,e.w('감독관이')+.2);if(pb>0){const r=rise(pb,24);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,1340,940,170);txt('입건',140,1440,{w:900,size:44,align:'center'});txt('송치',940,1440,{w:900,size:44,align:'center'});
+    arrow(200,1425,870,1425,P(t,e.w('감독관이'),e.w('송치까지')+.3),{wd:10,head:24});
+    const pl=P(t,e.w('직접')-.1,e.w('직접')+.3);if(pl>0)withT(535,1385,pop(pl),1,()=>chip(0,0,'감독관 직접 수사',{bg:C.yellow,fg:C.ink,size:32,w:900}));
+    ctx.restore();}
+},sfx:e=>[['thud',0],['stamp',e.w('닫던')],['swoosh',e.w('날,')],['rise',e.w('개정')-.2],['scribble',e.w('없앴습니다')-.1],['pop',e.w('없앴습니다')+.35],
+  ['tick',e.w('임금체불,')-.15],['tick',e.w('산업재해,')-.15],['tick',e.w('부당노동행위,')-.15],['tick',e.w('불법파견')-.15],['whoosh',e.w('감독관이')],['pop',e.w('직접')-.1]]});
+
+// 3. The legal check that disappears
+S.push({item:-1,lead:.3,tail:.55,f(t,e){
+  headline(['사라진 법률 검증'],t,[-.1],{y:320,size:72});
+  const bp=P(t,-.1,.25);if(bp>0){const r=rise(bp,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(600,500,410,380,{glow:P(t,e.w('법률'),e.w('법률')+.3)});scaleIcon(805,610,.9);
+    txt('법률 검증',805,760,{w:900,size:54,align:'center'});txt('송치 전 검사의 지휘',805,812,{w:700,size:30,color:C.muted,align:'center'});ctx.restore();}
+  [['근로자성','근로자성,'],['임금 해당성','임금'],['원청의 사용자성','원청의']].forEach(([lb,wd],i)=>{const ti=e.w(wd),p=P(t,ti-.15,ti+.2);if(p<=0)return;const y=540+i*150;
+    ctx.save();ctx.globalAlpha*=eo(p);ctx.translate((1-eo(p))*-60,0);panel(70,y-55,470,110,{r:20});txt(lb,110,y+14,{w:900,size:42});ctx.restore();
+    arrow(548,y,592,lerp(y,690,.5),P(t,e.w('따져')-.2+i*.1,e.w('따져')+.2+i*.1),{wd:7,head:18});});
+  const pj=P(t,e.w('판례가')-.1,e.w('판례가')+.25);if(pj>0)withT(305,990,pop(pj),1,()=>chip(0,0,'판례가 갈리는 쟁점',{bg:C.yellow+'26',fg:C.yellow,size:34,w:900}));
+  const pi=P(t,e.w('법률')-.3,e.w('법률')+.1);if(pi>0){const r=rise(pi,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,1100,940,300);txt('노동감독관 = 행정감독 + 형사수사',540,1210,{w:900,size:46,align:'center'});
+    txt('사업장 감독 자료가 곧 형사 입건의 근거가 되는 구조',540,1290,{w:700,size:32,color:C.muted,align:'center'});
+    txt('→ 수사 부처 밖 법률가의 점검이 빠지는 셈',540,1350,{w:800,size:32,color:C.yellow,align:'center'});ctx.restore();}
+  stamp(805,640,'지휘 폐지',P(t,e.w('장치였습니다')+.1,e.w('장치였습니다')+.35),{size:52,rot:-.15});
+},sfx:e=>[['thud',0],['tick',e.w('근로자성,')-.15],['tick',e.w('임금')-.15],['tick',e.w('원청의')-.15],['pop',e.w('판례가')-.1],['swoosh',e.w('따져')-.2],['rise',e.w('법률')-.3],['stamp',e.w('장치였습니다')+.1]]});
+
+// 4. Every case still goes to the prosecutor — and may bounce back
+S.push({item:-1,lead:.3,tail:.55,f(t,e){
+  headline(['송치는 그대로'],t,[-.1],{y:320,size:72});
+  const pb=P(t,-.1,.25);if(pb>0){ctx.save();ctx.globalAlpha=eo(pb);building(80,470,340,250,'노동청',{accent:C.blue});building(660,470,340,250,'공소청',{accent:C.red});ctx.restore();}
+  const ps=P(t,e.w('모든')-.1,e.w('보내야')+.2);arrow(440,800,640,800,ps,{wd:10,head:24});
+  if(ps>0){const a=eo(clamp(ps*2));txt('전건 송치',540,860,{w:900,size:36,align:'center',alpha:a});
+    const ph=P(t,e.w('혐의가')-.1,e.w('혐의가')+.25);if(ph>0)withT(250,800,pop(ph),1,()=>chip(0,0,'혐의 없음도',{bg:C.panel2,fg:C.fg,size:30,w:800}));
+    txt('제245조의10 ⑤',540,900,{w:700,size:26,color:C.muted,align:'center',alpha:a});}
+  const pr=P(t,e.w('보완수사')-.1,e.w('보완수사')+.4);arrow(640,980,440,980,pr,{wd:10,head:24,color:C.orange});
+  if(pr>0){const a=eo(clamp(pr*2));txt('보완수사 요구',540,1040,{w:900,size:36,align:'center',color:C.orange,alpha:a});txt('제197조의2',540,1080,{w:700,size:26,color:C.muted,align:'center',alpha:a});}
+  const pp=P(t,e.w('오갈')-.1,e.w('오갈')+.2);if(pp>0){const k=(t-e.w('오갈'))*3.2;const x=540+Math.sin(k)*95;docIcon(x,600,.55,'사건',{alpha:eo(pp)});}
+  const pc=P(t,e.w('기업은')-.15,e.w('기업은')+.2);if(pc>0){const r=rise(pc,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,1150,940,330,{glow:P(t,e.w('두세'),e.w('두세')+.3)});
+    personIcon(190,1330,60,C.yellow);txt('기업',190,1450,{w:800,size:30,align:'center',color:C.muted});
+    txt('같은 쟁점을',300,1290,{w:800,size:44});txt('반복 소명',300,1360,{w:900,size:56});
+    const n=1+Math.floor(clamp((t-e.w('두세'))/.5)*2);txt('×'+n,870,1370,{w:900,size:140,color:n>1?C.red:C.fg,align:'center'});ctx.restore();}
+},sfx:e=>[['thud',0],['swoosh',e.w('모든')-.1],['pop',e.w('혐의가')-.1],['swoosh',e.w('보완수사')-.1],['tick',e.w('오갈')],['tick',e.w('오갈')+.5],['rise',e.w('기업은')-.15],['count',e.w('두세'),.6]]});
+
+// 5. Experience and headcount — judgement may vary
+S.push({item:-1,lead:.3,tail:.6,f(t,e){
+  headline(['숙련 없는 독립'],t,[-.1],{y:320,size:72});
+  const pa=P(t,-.1,.25);if(pa>0){const r=rise(pa,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);panel(70,440,940,400);
+    const p8=P(t,e.w('여덟')-.1,e.w('여덟')+.7);
+    for(let i=0;i<10;i++){const x=150+(i%5)*92,y=i<5?570:720;personIcon(x,y,34,i<Math.round(8*p8)?C.yellow:C.fg+'30');}
+    const pn=P(t,e.w('삼')-.2,e.w('삼')+.3);if(pn>0){txt((80.5*eo(pn)).toFixed(1)+'%',800,640,{w:900,size:110,align:'center',color:C.yellow});
+      txt('수사 경력 3년 미만',800,710,{w:800,size:34,align:'center',alpha:eo(pn)});}
+    txt('1년 미만 47.2% · 수사 전담 20.6% · 전체 특사경 기준',540,805,{w:700,size:26,color:C.muted,align:'center',alpha:pn});ctx.restore();}
+  const pb=P(t,e.w('감독관은')-.2,e.w('감독관은')+.2);if(pb>0){const r=rise(pb,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);panel(70,880,940,300);
+    txt('노동감독관 인원',110,950,{w:900,size:36});
+    const bar=(y,lab,v,p,col,label)=>{txt(lab,110,y+14,{w:800,size:30,color:C.muted});ctx.fillStyle=col;rr(300,y-24,640*v/8000*eo(p),48,12);ctx.fill();if(p>0)txt(label,300+640*v/8000*eo(p)+(v>5000?-16:16),y+12,{w:900,size:30,align:v>5000?'right':'left',color:v>5000?C.ink:C.fg});};
+    bar(1030,'2024년',3131,1,C.fg+'50','3,131명');bar(1120,'2028년 계획',8000,P(t,e.w('두')-.1,e.w('두')+.6),C.yellow,'8,000명 수준');ctx.restore();}
+  const pc=P(t,e.w('감독관마다')-.2,e.w('감독관마다')+.2);if(pc>0){const r=rise(pc,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);panel(70,1220,940,320);
+    [['O',C.green],['X',C.red],['?',C.yellow]].forEach(([m,col],i)=>{const x=170+i*150;personIcon(x,1380,40,C.blue);
+      const pm=P(t,e.w('결론이')-.1+i*.15,e.w('결론이')+.2+i*.15);if(pm>0)withT(x,1290,pop(pm),1,()=>{ctx.fillStyle=col;ctx.beginPath();ctx.arc(0,0,30,0,7);ctx.fill();txt(m,0,13,{w:900,size:36,color:C.ink,align:'center'});});});
+    txt('같은 쟁점, 다른 결론',320,1500,{w:800,size:30,color:C.muted,align:'center'});
+    const pk=P(t,e.w('비용은')-.1,e.w('기업이')+.2);arrow(560,1370,700,1370,pk,{wd:9,head:22});
+    if(pk>0)withT(840,1370,pop(P(t,e.w('기업이')-.1,e.w('기업이')+.25)),1,()=>{coin(0,-40,44);txt('기업 부담',0,60,{w:900,size:40,align:'center'});});ctx.restore();}
+  txt('출처: 대검찰청, 「2025년 특별사법경찰 업무처리 현황 및',540,1600,{w:700,size:26,color:C.muted,align:'center',alpha:pa});
+  txt('성과 지표 분석」(전체 특사경 2만419명) · 증원은 정부 계획',540,1640,{w:700,size:26,color:C.muted,align:'center',alpha:pa});
+},sfx:e=>[['thud',0],['count',e.w('여덟')-.1,.7],['ding',e.w('삼')+.3],['rise',e.w('감독관은')-.2],['swoosh',e.w('두')-.1],['pop',e.w('결론이')-.1],['pop',e.w('결론이')+.05],['pop',e.w('결론이')+.2],['coin',e.w('기업이')-.1]]});
+
+// 6. Response 1 — write the legal points down early
+S.push({item:1,lead:.3,tail:.55,f(t,e){
+  const t1=e.w('첫째,'),fo=1-P(t,t1-.35,t1-.05);
+  if(fo>0){ctx.save();ctx.globalAlpha=fo;headline(['조사 초기부터','사실과 법리를','기록에'],t,[-.1,e.w('사실과')-.1,e.w('기록에')-.1],{y:620,size:96});
+    const pr=P(t,e.w('그래서')-.2,e.w('그래서')+.2);if(pr>0)withT(540,420,pop(pr),1,()=>chip(0,0,'기업이 메울 공백',{bg:C.red,fg:'#fff',size:38,w:900}));ctx.restore();}
+  itemHead(t,1,'법리 쟁점은 서면으로',t1-.1,t1+.1,{sub:'혐의·쟁점이 드러나면 의견서로',tSub:e.w('쟁점이')});
+  const pd=P(t,e.w('쟁점이')-.1,e.w('쟁점이')+.3);if(pd>0){const r=rise(pd,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    docIcon(250,700,1.9,'의견서');stamp(250,820,'제출',P(t,e.w('의견서로')-.05,e.w('의견서로')+.2),{size:50,color:C.yellow});ctx.restore();}
+  [['근로자성','근로자성,'],['임금성','임금성,'],['사용자 책임','사용자']].forEach(([lb,wd],i)=>rowCheck(450,560+i*130,lb,P(t,e.w(wd)-.15,e.w(wd)+.35),{w:560,size:44}));
+  const pl=P(t,e.w('회사의')-.1,e.w('회사의')+.3);if(pl>0)withT(735,960,pop(pl),1,()=>chip(0,0,'회사의 논리',{bg:C.yellow,fg:C.ink,size:34,w:900}));
+  const pn=P(t,e.w('드러나면')-.1,e.w('드러나면')+.3);if(pn>0){const r=rise(pn,24);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,1100,940,190);txt('출석 요구를 받으면',110,1170,{w:800,size:32,color:C.muted});
+    txt('문제 되는 행위와 적용 법조부터 확인',110,1240,{w:900,size:42});ctx.restore();}
+},sfx:e=>[['rise',0],['pop',e.w('그래서')-.2],['tick',e.w('사실과')-.1],['tick',e.w('기록에')-.1],['whoosh',e.w('첫째,')-.2],['thud',e.w('첫째,')],
+  ['check',e.w('근로자성,')+.1],['check',e.w('임금성,')+.1],['check',e.w('사용자')+.1],['pop',e.w('회사의')-.1],['stamp',e.w('의견서로')]]});
+
+// 7. Response 1 (cont.) — wage arrears: record the grounds for disputing the obligation
+S.push({item:1,lead:.3,tail:.6,f(t,e){
+  itemHead(t,1,'임금체불이라면',-.2,-.2,{sub:'대법원 2007. 6. 28. 선고 2007도1539 판결',tSub:-.2});
+  const pa=P(t,-.1,.25);if(pa>0){const r=rise(pa,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,460,940,420,{glow:P(t,e.w('대법원'),e.w('대법원')+.3)*(1-P(t,e.w('그'),e.w('그')+.4))});
+    const p1=P(t,e.w('다툴')-.15,e.w('다툴')+.25);if(p1>0){ctx.save();ctx.globalAlpha*=eo(p1);ctx.fillStyle=C.panel2;rr(110,510,380,300,22);ctx.fill();
+      txt('지급의무의',300,590,{w:800,size:36,align:'center',color:C.muted});txt('존부·범위에',300,640,{w:800,size:36,align:'center',color:C.muted});
+      txt('다툴 만한 근거',300,730,{w:900,size:44,align:'center'});ctx.restore();}
+    arrow(500,660,580,660,P(t,e.w('있으면')-.1,e.w('있으면')+.3),{wd:9,head:22});
+    const p2=P(t,e.w('어렵다는')-.15,e.w('어렵다는')+.25);if(p2>0){ctx.save();ctx.globalAlpha*=eo(p2);ctx.fillStyle=C.green+'22';rr(590,510,380,300,22);ctx.fill();
+      ctx.strokeStyle=C.green;ctx.lineWidth=3;ctx.stroke();txt('체불의 고의',780,620,{w:900,size:46,align:'center'});txt('인정 어려움',780,690,{w:900,size:46,align:'center',color:C.green});ctx.restore();}
+    const pg=P(t,e.w('대법원')-.1,e.w('대법원')+.25);if(pg>0)withT(540,850,pop(pg),1,()=>chip(0,0,'대법원',{bg:C.navy,fg:'#fff',size:30,w:900}));
+    ctx.restore();}
+  const pb=P(t,e.w('그')-.15,e.w('그')+.2);if(pb>0){const r=rise(pb,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,930,940,560);txt('기록에 남길 것',110,1000,{w:900,size:40,color:C.yellow});
+    const pf=P(t,e.w('처음부터')-.1,e.w('처음부터')+.3);if(pf>0)withT(870,990,pop(pf),1,()=>chip(0,0,'수사 초기부터',{bg:C.red,fg:'#fff',size:30,w:900}));
+    rowCheck(110,1090,'지급의무를 다투는 근거',P(t,e.w('근거와')-.15,e.w('근거와')+.35),{w:860,size:42});
+    rowCheck(110,1215,'당시의 판단 경위',P(t,e.w('판단')-.15,e.w('판단')+.35),{w:860,size:42});
+    rowCheck(110,1340,'객관적 자료',P(t,e.w('자료와')-.15,e.w('자료와')+.35),{w:860,size:42});ctx.restore();}
+},sfx:e=>[['thud',0],['pop',e.w('다툴')-.15],['swoosh',e.w('있으면')-.1],['ding',e.w('어렵다는')-.15],['pop',e.w('대법원')-.1],['rise',e.w('그')-.15],
+  ['check',e.w('근거와')+.1],['check',e.w('판단')+.1],['check',e.w('자료와')+.1],['pop',e.w('처음부터')-.1]]});
+
+// 8. Response 2 — facts on paper before anyone testifies
+S.push({item:2,lead:.3,tail:.55,f(t,e){
+  itemHead(t,2,'사실관계는 문서로 먼저',-.2,-.1,{sub:'출석 전에 정리',tSub:e.w('출석')-.1});
+  [['근로계약서','근로계약서,'],['급여 내역','급여'],['업무 지시','업무']].forEach(([lb,wd],i)=>{const p=P(t,e.w(wd)-.15,e.w(wd)+.25);if(p<=0)return;
+    withT(220+i*320,620,pop(p),1,()=>docIcon(0,0,1.15,lb));});
+  const ps=P(t,e.w('사실관계를')-.15,e.w('사실관계를')+.3);
+  if(ps>0){[220,540,860].forEach(x=>arrow(x,750,540,860,ps,{wd:7,head:18}));
+    withT(540,930,pop(ps),1,()=>{panel(-330,-70,660,140,{glow:P(t,e.w('정리합니다'),e.w('정리합니다')+.3)});txt('사실관계 정리',0,18,{w:900,size:50,align:'center'});});}
+  const pp=P(t,e.w('진술은')-.15,e.w('진술은')+.25);if(pp>0){const r=rise(pp,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,1070,940,420);
+    ['대표자','인사 담당자','현장 관리자'].forEach((lb,i)=>{const x=230+i*310;personIcon(x,1200,50,[C.blue,C.green,C.orange][i]);txt(lb,x,1310,{w:900,size:34,align:'center'});
+      const pk=P(t,e.w('직접')-.1+i*.12,e.w('직접')+.25+i*.12);if(pk>0)withT(x,1380,pop(pk),1,()=>chip(0,0,'직접 아는 범위',{bg:C.yellow+'26',fg:C.yellow,size:26,w:800,padX:16}));});
+    txt('기억에만 의존하면 어긋난 틈이 혐의의 근거로 읽힙니다',540,1460,{w:700,size:28,color:C.muted,align:'center'});ctx.restore();}
+},sfx:e=>[['thud',0],['pop',e.w('근로계약서,')-.15],['pop',e.w('급여')-.15],['pop',e.w('업무')-.15],['swoosh',e.w('사실관계를')-.15],['rise',e.w('진술은')-.15],['tick',e.w('직접')-.1],['tick',e.w('직접')+.02],['tick',e.w('직접')+.14]]});
+
+// 9. Response 3 — counsel in the interview so the record is right
+S.push({item:3,lead:.3,tail:.6,f(t,e){
+  itemHead(t,3,'변호인 조사 참여',-.2,-.1,{sub:'법리와 사실이 조서에 남도록',tSub:e.w('판단에')-.1});
+  [['의견서','변호인이'],['질문·답변','참여해,'],['조서','조서에']].forEach(([lb,wd],i)=>{const p=P(t,e.w(wd)-.15,e.w(wd)+.25);if(p<=0)return;const x=200+i*340;
+    withT(x,560,pop(p),1,()=>{panel(-140,-70,280,140,{r:24,glow:i===2?P(t,e.w('조서에'),e.w('조서에')+.3):0});txt(lb,0,16,{w:900,size:44,align:'center'});});
+    if(i>0)arrow(x-196,560,x-148,560,p,{wd:8,head:20});});
+  const pc=P(t,e.w('판단에')-.15,e.w('판단에')+.25);if(pc>0){const r=rise(pc,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    lawyer(220,860,.62,{t,talk:0,arm:lerp(.2,-1.2,eo(P(t,e.w('판단에'),e.w('판단에')+.5))),cut:330,blink:(t%3)>2.9});
+    ctx.fillStyle=C.panel2;rr(70,1060,300,30,10);ctx.fill();
+    panel(400,690,610,560);txt('조 서',705,770,{w:900,size:46,align:'center',ls:12});ctx.fillStyle=C.line;ctx.fillRect(450,800,510,3);
+    rowCheck(430,890,'판단에 필요한 사실',P(t,e.w('사실과')-.15,e.w('사실과')+.35),{w:550,size:38});
+    rowCheck(430,1015,'그에 관한 진술',P(t,e.w('진술이')-.15,e.w('진술이')+.35),{w:550,size:38});
+    stamp(705,1160,'정확히 기재',P(t,e.w('정확히')-.05,e.w('정확히')+.2),{size:48,color:C.yellow});ctx.restore();}
+  const pn=P(t,e.w('남도록')-.1,e.w('남도록')+.3);if(pn>0)txt('조서에서 빠진 진술은 송치 후 판단에 쓰이기 어렵습니다',540,1340,{w:700,size:30,color:C.muted,align:'center',alpha:eo(pn)});
+},sfx:e=>[['thud',0],['pop',e.w('변호인이')-.15],['pop',e.w('참여해,')-.15],['pop',e.w('조서에')-.15],['rise',e.w('판단에')-.15],['check',e.w('사실과')+.1],['check',e.w('진술이')+.1],['stamp',e.w('정확히')]]});
+
+// 10. Response 4 — objection during the investigation, follow-up after referral
+S.push({item:4,lead:.3,tail:.6,f(t,e){
+  itemHead(t,4,'이의제기 · 송치 후 대응',-.2,-.1);
+  const p1=P(t,e.w('수사')-.15,e.w('수사')+.25);if(p1>0){const r=rise(p1,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,450,940,420,{glow:P(t,e.w('수사심의위원회'),e.w('수사심의위원회')+.3)*(1-P(t,e.w('송치'),e.w('송치')+.4))});
+    chip(110,500,'수사 중',{bg:C.blue,fg:'#fff',size:30,w:900,align:'left'});
+    txt('수사 방향',150,600,{w:900,size:44});txt('≠',420,600,{w:900,size:56,color:C.red,align:'center'});
+    const pl=P(t,e.w('법리와')-.1,e.w('법리와')+.25);if(pl>0)txt('법리',520,600,{w:900,size:44,alpha:eo(pl)});
+    const pc=P(t,e.w('수사심의위원회')-.15,e.w('수사심의위원회')+.25);if(pc>0){ctx.save();ctx.globalAlpha*=eo(pc);ctx.fillStyle=C.panel2;rr(110,660,860,120,20);ctx.fill();
+      govIcon(180,722,.55);txt('수사심의위원회 이의제기 검토',250,738,{w:900,size:40});ctx.restore();}
+    txt('노동부 내부 기구 · 본부와 7개 지방청, 외부위원 참여',540,840,{w:700,size:26,color:C.muted,align:'center',alpha:pc});ctx.restore();}
+  const p2=P(t,e.w('송치')-.15,e.w('송치')+.25);if(p2>0){const r=rise(p2,30);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    panel(70,910,940,560);chip(110,960,'송치 후',{bg:C.red,fg:'#fff',size:30,w:900,align:'left'});
+    txt('노동청',200,1060,{w:900,size:40,align:'center'});arrow(290,1046,600,1046,p2,{wd:9,head:22});txt('공소청 검사',790,1060,{w:900,size:40,align:'center'});
+    txt('기소 여부는 공소청 검사가 결정',540,1120,{w:700,size:28,color:C.muted,align:'center'});
+    rowCheck(110,1230,'의견서가 기록에 반영됐는지 확인',P(t,e.w('반영됐는지')-.15,e.w('반영됐는지')+.35),{w:860,size:40});
+    rowCheck(110,1360,'필요하면 법리 의견 보충',P(t,e.w('보충합니다')-.15,e.w('보충합니다')+.35),{w:860,size:40});ctx.restore();}
+},sfx:e=>[['thud',0],['rise',e.w('수사')-.15],['tick',e.w('법리와')-.1],['pop',e.w('수사심의위원회')-.15],['whoosh',e.w('송치')-.15],['check',e.w('반영됐는지')+.1],['check',e.w('보충합니다')+.1]]});
+
+// 11. Takeaway — recap of the four steps + save chip
+S.push({item:-1,lead:.3,tail:1,f(t,e){
+  headline(['조사 초기의 기록이'],t,[-.1],{y:320,size:72});
+  [['01','법리 쟁점 의견서'],['02','사실관계 문서 정리'],['03','변호인 조사 참여'],['04','이의제기·송치 후 보충']].forEach(([n,lb],i)=>{const p=P(t,-.1+i*.12,.25+i*.12);if(p<=0)return;
+    const x=70+(i%2)*480,y=450+Math.floor(i/2)*190;withT(x+230,y+80,pop(p),1,()=>{panel(-230,-80,460,160,{r:24});txt(n,-196,-14,{w:900,size:40,color:C.yellow});txt(lb,-196,44,{w:900,size:34});});});
+  [['잘못된 혐의 판단','잘못된'],['불필요한 보완수사','불필요한']].forEach(([lb,wd],i)=>{const p=P(t,e.w(wd)-.15,e.w(wd)+.25);if(p<=0)return;const y=920+i*150;
+    ctx.save();ctx.globalAlpha*=eo(p);ctx.fillStyle=C.red+'1F';rr(70,y-55,940,110,20);ctx.fill();txt(lb,120,y+16,{w:900,size:46});
+    const pd=P(t,e.w('줄입니다')-.1,e.w('줄입니다')+.4);if(pd>0){arrow(880,y-30,880,y+30,pd,{wd:10,head:24,color:C.green});txt('위험 ↓',800,y+16,{w:900,size:36,color:C.green,align:'right',alpha:eo(pd)});}
+    ctx.restore();});
+  const sv=P(t,e.w('줄입니다')+.2,e.w('줄입니다')+.5);if(sv>0)withT(540,1300,pop(sv),1,()=>{const w=tw('조사 대응용으로 저장해 두세요',800,34)+120;
+    ctx.fillStyle=C.yellow+'22';rr(-w/2,-38,w,76,38);ctx.fill();ctx.strokeStyle=C.yellow;ctx.lineWidth=2;ctx.stroke();
+    bookmark(-w/2+46,0,1.1,C.yellow);txt('조사 대응용으로 저장해 두세요',-w/2+84,12,{w:800,size:34,color:C.yellow});});
+},sfx:e=>[['rise',0],['tick',0],['tick',.12],['tick',.24],['tick',.36],['buzz',e.w('잘못된')-.15],['buzz',e.w('불필요한')-.15],['ding',e.w('줄입니다')],['pop',e.w('줄입니다')+.2]]});
+
+// 12. Closing — silent built-in ending (CONFIG.ending)
+S.push(ending(CONFIG.ending,{q:['출석 요구를 받으면,','우리 회사는 누가 무엇부터 하나요?']}));
+
+const CAPS=[
+ ['지난 시월 이일부터','노동감독관은 검사의 지휘 없이','직접 수사합니다','기업은 무엇을 준비해야 할까요'],
+ ['검찰청이 문을 닫던 날','개정 형사소송법은','특별사법경찰관에 대한','검사의 수사지휘를 없앴습니다','이제 임금체불 산업재해','부당노동행위 불법파견 사건은','감독관이 송치까지 직접 수사합니다'],
+ ['검사의 지휘는','근로자성 임금 해당성','원청의 사용자성처럼','판례가 갈리는 쟁점을','한 번 더 따져 보는','법률 검증 장치였습니다'],
+ ['그런데 감독관은','혐의가 없다고 봐도','모든 사건을 검사에게 보내야 하고','보완수사 요구로','사건이 오갈 수 있습니다','기업은 같은 쟁점을','두세 번 소명하게 될 수 있습니다'],
+ ['전국 특사경 열 명 중 여덟 명은','수사 경력이 삼 년 미만이고','감독관은 두 배 넘게','늘어날 계획입니다','감독관마다 결론이 달라지면','그 비용은 기업이 치릅니다'],
+ ['그래서 기업은 조사 초기부터','사실과 법리를','기록에 남겨야 합니다','첫째 쟁점이 드러나면','근로자성 임금성','사용자 책임에 관한','회사의 논리를 의견서로 냅니다'],
+ ['임금체불은','지급의무를 다툴 만한','근거가 있으면','고의를 인정하기 어렵다는 것이','대법원 입장입니다','그 근거와 당시 판단 경위를','자료와 함께','처음부터 남겨 두세요'],
+ ['둘째 출석 전에','근로계약서 급여 내역','업무 지시 기록으로','사실관계를 먼저 정리합니다','진술은 각자','직접 아는 범위에서 합니다'],
+ ['셋째 변호인이 조사에 참여해','판단에 필요한 사실과 진술이','조서에 정확히 남도록 합니다'],
+ ['넷째 수사 방향이','법리와 어긋나면','수사심의위원회 이의제기를 검토하고','송치 뒤에는','의견서가 기록에 반영됐는지','확인해 보충합니다'],
+ ['조사 초기의 기록이','잘못된 혐의 판단과','불필요한 보완수사의','위험을 줄입니다'],
+ null];
+// transition INTO scene i+1
+const TRANS=['push-left','push-up','push-left','push-up','hazard','push-up','push-left','iris','push-left','zoom','zoom'];
+const IRIS={8:toScr(540,1300)};
+
+
+const TD=.42,LOOP_TD=.5;
+let TOTAL=0,CUES=[],SFX=[],PHRASES=[];
+function build(){
+  let acc=0;
+  S.forEach((s,i)=>{const clip=TIMING.CLIP[i]||0;   // scenes past the script are silent (e.g. a closing card)
+    s.d=Math.max(s.min||0,s.lead+clip+s.tail);
+    s.words=(TIMING.W[i]||[]).map(([w,a,b])=>[w,a+s.lead,b+s.lead]);
+    const find=(p,n)=>{const m=s.words.filter(x=>x[0].startsWith(p));if(!m[n])throw new Error(`word "${p}"#${n} not in scene ${i+1}`);return m[n];};
+    s.e={w:(p,n=0)=>find(p,n)[1],we:(p,n=0)=>find(p,n)[2],end:s.lead+clip};
+    s.s=acc;acc+=s.d;});
+  TOTAL=acc;CUES=S.filter((s,i)=>i<TIMING.CLIP.length).map(s=>+(s.s+s.lead).toFixed(3));
+  S.forEach((s,i)=>{(s.sfx?s.sfx(s.e):[]).forEach(([k,t,d])=>SFX.push([k,+(s.s+t).toFixed(3),d||0]));if(i>0&&!s.full)SFX.push(['whoosh',+(s.s-.05).toFixed(3),0]);});
+  if(CONFIG.loop&&!S[S.length-1].full)SFX.push(['whoosh',+(TOTAL-LOOP_TD-.05).toFixed(3),0]);
+  S.forEach((s,i)=>{if(!CAPS[i])return;let k=0;
+    CAPS[i].forEach(line=>{const n=line.split(' ').length,ph=s.words.slice(k,k+n).map(([w,a,b])=>[w.replace(/[.,?]$/,''),s.s+a,s.s+b]);
+      if(ph.map(x=>x[0]).join(' ')!==line)console.log('caption mismatch',i+1,line,'|',ph.map(x=>x[0]).join(' '));PHRASES.push(ph);k+=n;});
+    if(k!==s.words.length)console.log('caption words left over in scene',i+1);});
+  window.TOTAL=TOTAL;window.CUES=CUES;window.SFX=SFX;}
+
+function captions(T){
+  let ph=null;for(let i=0;i<PHRASES.length;i++){const p=PHRASES[i],st=p[0][1]-.06,en=Math.min(p[p.length-1][2]+.35,PHRASES[i+1]?PHRASES[i+1][0][1]-.06:1e9);
+    if(T>=st&&T<en){ph=p;break;}}
+  if(!ph)return;const size=50;font(800,size);const sp=16;
+  const ws=ph.map(x=>ctx.measureText(x[0]).width);const tot=ws.reduce((a,b)=>a+b,0)+sp*(ph.length-1);
+  const a=P(T,ph[0][1]-.06,ph[0][1]+.08);const s=lerp(.92,1,eo(a));
+  ctx.save();ctx.translate(W/2,1548);ctx.scale(s,s);ctx.globalAlpha=clamp(a*1.5);
+  ctx.fillStyle=C.capBg;rr(-tot/2-34,-48,tot+68,96,48);ctx.fill();
+  let x=-tot/2;ph.forEach(([w,st,en],i)=>{const on=T>=st,cur=T>=st&&T<en+.04;
+    if(cur){ctx.fillStyle=C.yellow;rr(x-8,-34,ws[i]+16,68,12);ctx.fill();}
+    ctx.fillStyle=cur?C.ink:on?C.capFg:C.capDim;ctx.textBaseline='middle';ctx.textAlign='left';ctx.fillText(w,x,3);x+=ws[i]+sp;});
+  ctx.restore();}
+
+const SC=CONFIG.safeScale;
+function drawScene(i,lt){const s=S[i];ctx.save();
+  const z=1+.03*clamp(lt/s.d);ctx.translate(540,760);ctx.scale(z,z);ctx.translate(-540,-760);
+  ctx.translate(540*(1-SC),90-120*SC);ctx.scale(SC,SC);
+  try{s.f(lt,s.e);}catch(err){console.log('scene',i+1,err.message);}
+  ctx.restore();}
+
+function renderFrame(T){
+  let i=S.findIndex(s=>T>=s.s&&T<s.s+s.d);if(i<0)i=S.length-1;const sc=S[i],lt=T-sc.s;
+  ctx=mctx;bg(T);
+  const inTrans=i>0&&lt<TD&&!sc.full,loopT=CONFIG.loop&&!S[S.length-1].full?T-(TOTAL-LOOP_TD):-1;   // a full-frame ending loops by itself
+  if(loopT>0){ // last moments: wipe back to frame 0 so the auto-replay is seamless
+    const k=eio(clamp(loopT/LOOP_TD));
+    for(const [c,idx,tt] of [[actxA,i,lt],[actxB,0,0]]){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);ctx=c;drawScene(idx,tt);}
+    ctx=mctx;ctx.drawImage(offA,0,0);const ex=lerp(-700,W+700,k);
+    ctx.save();ctx.beginPath();ctx.moveTo(-400,0);ctx.lineTo(ex,0);ctx.lineTo(ex-500,H);ctx.lineTo(-900,H);ctx.closePath();ctx.clip();bg(0);ctx.drawImage(offB,0,0);ctx.restore();
+    ctx.save();ctx.beginPath();ctx.moveTo(ex,0);ctx.lineTo(ex+140,0);ctx.lineTo(ex-360,H);ctx.lineTo(ex-500,H);ctx.closePath();ctx.clip();hazard(-600,0,W+1200,H,0);ctx.restore();
+    header(0,S[0].item);
+    ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(0,0,W,8);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*(1-k),8);
+    return;}
+  if(sc.full){ctx=mctx;ctx.save();try{sc.f(lt,sc.e);}catch(err){console.log('scene',i+1,err.message);}ctx.restore();return;}   // full-frame scene draws the whole screen itself
+  if(!inTrans)drawScene(i,lt);
+  else{const k=eio(lt/TD),type=TRANS[i-1],prev=S[i-1],plt=prev.d+lt;
+    for(const [c,idx,tt] of [[actxA,i-1,plt],[actxB,i,lt]]){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);ctx=c;drawScene(idx,tt);}
+    ctx=mctx;
+    if(type==='push-left'){ctx.drawImage(offA,-W*k,0);ctx.drawImage(offB,W*(1-k),0);}
+    else if(type==='push-up'){ctx.drawImage(offA,0,-H*k);ctx.drawImage(offB,0,H*(1-k));}
+    else if(type==='zoom'){ctx.save();ctx.globalAlpha=1-k;ctx.translate(540,800);ctx.scale(1+.35*k,1+.35*k);ctx.translate(-540,-800);ctx.drawImage(offA,0,0);ctx.restore();
+      ctx.save();ctx.globalAlpha=k;ctx.translate(540,800);ctx.scale(.88+.12*k,.88+.12*k);ctx.translate(-540,-800);ctx.drawImage(offB,0,0);ctx.restore();}
+    else if(type==='iris'){ctx.drawImage(offA,0,0);const [cx,cy]=IRIS[i]||[540,800];const R=Math.hypot(Math.max(cx,W-cx),Math.max(cy,H-cy))*k;
+      ctx.save();ctx.beginPath();ctx.arc(cx,cy,R,0,7);ctx.clip();bg(T);ctx.drawImage(offB,0,0);ctx.restore();
+      ctx.save();ctx.strokeStyle=C.yellow;ctx.lineWidth=18*(1-k);ctx.beginPath();ctx.arc(cx,cy,R,0,7);ctx.stroke();ctx.restore();}
+    else if(type==='hazard'){ctx.drawImage(offA,0,0);const ex=lerp(-700,W+700,k);
+      ctx.save();ctx.beginPath();ctx.moveTo(-400,0);ctx.lineTo(ex,0);ctx.lineTo(ex-500,H);ctx.lineTo(-900,H);ctx.closePath();ctx.clip();bg(T);ctx.drawImage(offB,0,0);ctx.restore();
+      ctx.save();ctx.beginPath();ctx.moveTo(ex,0);ctx.lineTo(ex+140,0);ctx.lineTo(ex-360,H);ctx.lineTo(ex-500,H);ctx.closePath();ctx.clip();hazard(-600,0,W+1200,H,0);ctx.restore();}
+  }
+  header(T,sc.item);
+  captions(T);
+  ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(0,0,W,8);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*T/TOTAL,8);
+
+}
+window.renderFrame=renderFrame;window.FPS=FPS;
+TIMING=window.TIMINGDATA;build();
+window.ready=Promise.resolve().then(()=>Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다')))).then(()=>document.fonts.ready).then(()=>{if(S.some(s=>s.full))captureFrames();});
+if(!location.search.includes('render')){window.ready.then(()=>{const st=performance.now();(function loop(){renderFrame(((performance.now()-st)/1000)%TOTAL);requestAnimationFrame(loop);})();});}
+</script></body></html>
