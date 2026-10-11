@@ -115,6 +115,11 @@ function ship(x,y,s,t){ctx.save();ctx.translate(x,y+Math.sin(t*2)*6);ctx.scale(s
   for(let i=0;i<3;i++){ctx.fillStyle=cols[(i+2)%5];rr(-88+i*62,-140,56,46,4);ctx.fill();}
   ctx.fillStyle=C.white;ctx.beginPath();ctx.moveTo(-200,-40);ctx.lineTo(200,-40);ctx.lineTo(160,30);ctx.lineTo(-170,30);ctx.closePath();ctx.fill();
   ctx.strokeStyle=C.blue;ctx.lineWidth=6;ctx.beginPath();for(let k=-240;k<=240;k+=20)ctx.lineTo(k,48+Math.sin(k*.05+t*4)*6);ctx.stroke();ctx.restore();}
+function bookmark(x,y,s,color=C.yellow){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle=color;
+  ctx.beginPath();ctx.moveTo(-14,-20);ctx.lineTo(14,-20);ctx.lineTo(14,22);ctx.lineTo(0,10);ctx.lineTo(-14,22);ctx.closePath();ctx.fill();ctx.restore();}
+function commentIcon(x,y,s,color=C.yellow){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle=color;rr(-34,-26,68,46,14);ctx.fill();
+  ctx.beginPath();ctx.moveTo(-14,18);ctx.lineTo(-22,34);ctx.lineTo(2,18);ctx.closePath();ctx.fill();
+  ctx.fillStyle=C.ink;[-14,0,14].forEach(dx=>{ctx.beginPath();ctx.arc(dx,-3,5,0,7);ctx.fill();});ctx.restore();}
 function lockIcon(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.strokeStyle='#fff';ctx.lineWidth=12;ctx.beginPath();ctx.arc(0,-20,30,Math.PI,0);ctx.stroke();
   ctx.fillStyle='#fff';rr(-46,-20,92,70,12);ctx.fill();ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(0,10,10,0,7);ctx.fill();ctx.restore();}
 function govIcon(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle=C.white;ctx.beginPath();ctx.moveTo(-70,-30);ctx.lineTo(0,-70);ctx.lineTo(70,-30);ctx.closePath();ctx.fill();
@@ -404,11 +409,15 @@ S.push({item:-1,lead:.3,tail:.6,f(t,e){
     lines.forEach((l,j)=>txt(l,270,y+36+j*36,{w:700,size:30,color:'#C9D1DC'}));ctx.restore();});
   const pt=P(t,e.w('절차부터')-.2,e.w('절차부터')+.2);if(pt>0)withT(540,1430,pop(pt),1,()=>{panel(-470,-110,940,220,{fill:'rgba(255,198,41,.14)',stroke:C.yellow});
     txt('기업 체크',-420,-36,{w:800,size:32,color:C.yellow});txt('작업중지 요구 대응 절차 점검',-420,40,{w:900,size:50});checkMark(380,10,1.4,P(t,e.w('점검해'),e.w('점검해')+.3),C.yellow);});
+  const sv=P(t,e.we('후까지')+.3,e.we('후까지')+.65);if(sv>0)withT(540,1262,pop(sv),1,()=>{const w=tw('시행일 확인용으로 저장해 두세요',800,32)+110;
+    ctx.fillStyle='rgba(255,198,41,.12)';rr(-w/2,-34,w,68,34);ctx.fill();ctx.strokeStyle='rgba(255,198,41,.6)';ctx.lineWidth=2;ctx.stroke();
+    bookmark(-w/2+42,0,1);txt('시행일 확인용으로 저장해 두세요',-w/2+76,12,{w:800,size:32,color:C.yellow});});
   txt('* 시행일은 공포일 기준',540,1600,{w:700,size:26,color:C.muted,align:'center',alpha:P(t,1,1.5)});
-},sfx:e=>[['rise',0],['tick',e.w('공포한')-.1],['tick',e.w('날부터')+.05],['tick',e.w('일')-.1],['tick',e.w('후까지')-.1],['ding',e.w('작업중지')],['pop',e.w('절차부터')-.2],['check',e.w('점검해')]]});
+},sfx:e=>[['rise',0],['tick',e.w('공포한')-.1],['tick',e.w('날부터')+.05],['tick',e.w('일')-.1],['tick',e.w('후까지')-.1],['ding',e.w('작업중지')],['pop',e.w('절차부터')-.2],['check',e.w('점검해')],['pop',e.we('후까지')+.3]]});
 
 // 11. CTA
-S.push({item:-1,lead:.35,tail:1.3,min:4.6,noCap:true,f(t,e){
+S.push({item:-1,lead:.35,tail:1.3,min:6.6,noCap:true,f(t,e){
+  const qT=e.end+.15;
   const p=P(t,0,.4),r=rise(p,60);
   ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
   ctx.fillStyle='rgba(255,198,41,.08)';ctx.beginPath();ctx.arc(540,820,330+Math.sin(t*1.4)*8,0,7);ctx.fill();
@@ -417,13 +426,16 @@ S.push({item:-1,lead:.35,tail:1.3,min:4.6,noCap:true,f(t,e){
   ctx.restore();
   // recap icons
   const lab=['위원회','작업중지','건설','과징금','포상금','인증'];
-  lab.forEach((l,i)=>{const pp=P(t,.3+i*.07,.6+i*.07);if(pp<=0)return;withT(165+i*150,1220,pop(pp),1,()=>{ctx.fillStyle=C.panel;ctx.beginPath();ctx.arc(0,0,58,0,7);ctx.fill();
+  const recapA=1-P(t,qT-.3,qT);
+  const qp=P(t,qT,qT+.35);if(qp>0)withT(540,1222,pop(qp),1,()=>{panel(-470,-92,940,184,{fill:C.panel2,stroke:'rgba(255,198,41,.5)'});
+    commentIcon(-392,-4,1.15);txt('우리 회사는 작업중지 요구,',-320,-14,{w:800,size:42});txt('누가 어떻게 받나요?',-320,46,{w:900,size:42,color:C.yellow});});
+  if(recapA>0)lab.forEach((l,i)=>{const pp=P(t,.3+i*.07,.6+i*.07);if(pp<=0)return;withT(165+i*150,1220,pop(pp),recapA,()=>{ctx.fillStyle=C.panel;ctx.beginPath();ctx.arc(0,0,58,0,7);ctx.fill();
     txt(String(i+1),0,-6,{w:900,size:38,color:C.yellow,align:'center'});txt(l,0,32,{w:700,size:22,align:'center',color:'#C9D1DC'});});});
   const pb=P(t,e.w('상생의')-.1,e.w('상생의')+.35);if(pb>0)withT(540,1390,pop(pb),1,()=>{ctx.fillStyle=C.yellow;rr(-380,-60,760,120,60);ctx.fill();
     txt('상생의 노동법  |  박재우 변호사',0,14,{w:900,size:40,color:C.ink,align:'center'});});
   txt('출처: 고용노동부 보도참고자료(2026.10.1.)',540,1520,{w:700,size:28,color:C.muted,align:'center',alpha:P(t,.6,1)});
   txt('「산업재해 예방을 위한 노사의 역할 강화」',540,1565,{w:700,size:28,color:C.muted,align:'center',alpha:P(t,.6,1)});
-},sfx:e=>[['rise',0],['pop',e.w('상생의')-.1]]});
+},sfx:e=>[['rise',0],['pop',e.w('상생의')-.1],['pop',e.end+.15]]});
 
 /* ---------- captions (hand-picked breaks) ---------- */
 const CAPS=[
@@ -438,7 +450,7 @@ const CAPS=[
  ['여섯째','수출 목적으로 수입한 기계도','안전인증을','면제받을 수 있습니다'],
  ['시행 시기는 항목마다 다릅니다','공포한 날부터 일 년 후까지','차례로 시행되니','작업중지 요구에 대응하는','절차부터 미리','점검해 두시기 바랍니다'],
  null];
-const TD=.42;
+const TD=.42,LOOP_TD=.5;
 const TRANS=['zoom','push-left','hazard','push-up','push-left','iris','push-up','push-left','hazard','zoom'];
 let TOTAL=0,CUES=[],SFX=[],PHRASES=[];
 function build(){
@@ -450,6 +462,7 @@ function build(){
     s.s=acc;acc+=s.d;});
   TOTAL=acc;CUES=S.map(s=>+(s.s+s.lead).toFixed(3));
   S.forEach((s,i)=>{(s.sfx?s.sfx(s.e):[]).forEach(([k,t,d])=>SFX.push([k,+(s.s+t).toFixed(3),d||0]));if(i>0)SFX.push(['whoosh',+(s.s-.05).toFixed(3),0]);});
+  SFX.push(['whoosh',+(TOTAL-LOOP_TD-.05).toFixed(3),0]);
   S.forEach((s,i)=>{if(!CAPS[i])return;let k=0;
     CAPS[i].forEach(line=>{const n=line.split(' ').length,ph=s.words.slice(k,k+n).map(([w,a,b])=>[w.replace(/[.,?]$/,''),s.s+a,s.s+b]);
       if(ph.map(x=>x[0]).join(' ')!==line)console.log('caption mismatch',i+1,line,'|',ph.map(x=>x[0]).join(' '));PHRASES.push(ph);k+=n;});
@@ -481,7 +494,16 @@ const IRIS={6:toScr(540,1300)};   // into scene 7: from the outcome card of scen
 function renderFrame(T){
   let i=S.findIndex(s=>T>=s.s&&T<s.s+s.d);if(i<0)i=S.length-1;const sc=S[i],lt=T-sc.s;
   ctx=mctx;bg(T);
-  const inTrans=i>0&&lt<TD;
+  const inTrans=i>0&&lt<TD,loopT=T-(TOTAL-LOOP_TD);
+  if(loopT>0){ // last moments: wipe back to frame 0 so the auto-replay is seamless
+    const k=eio(clamp(loopT/LOOP_TD));
+    for(const [c,idx,tt] of [[actxA,i,lt],[actxB,0,0]]){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);ctx=c;drawScene(idx,tt);}
+    ctx=mctx;ctx.drawImage(offA,0,0);const ex=lerp(-700,W+700,k);
+    ctx.save();ctx.beginPath();ctx.moveTo(-400,0);ctx.lineTo(ex,0);ctx.lineTo(ex-500,H);ctx.lineTo(-900,H);ctx.closePath();ctx.clip();bg(0);ctx.drawImage(offB,0,0);ctx.restore();
+    ctx.save();ctx.beginPath();ctx.moveTo(ex,0);ctx.lineTo(ex+140,0);ctx.lineTo(ex-360,H);ctx.lineTo(ex-500,H);ctx.closePath();ctx.clip();hazard(-600,0,W+1200,H,0);ctx.restore();
+    header(0,-1);
+    ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(0,0,W,8);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*(1-k),8);
+    return;}
   if(!inTrans)drawScene(i,lt);
   else{const k=eio(lt/TD),type=TRANS[i-1],prev=S[i-1],plt=prev.d+lt;
     for(const [c,idx,tt] of [[actxA,i-1,plt],[actxB,i,lt]]){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);ctx=c;drawScene(idx,tt);}
@@ -500,7 +522,7 @@ function renderFrame(T){
   header(T,sc.item);
   captions(T);
   ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(0,0,W,8);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*T/TOTAL,8);
-  const fo=P(T,TOTAL-.6,TOTAL);if(fo>0){ctx.fillStyle=`rgba(0,0,0,${fo})`;ctx.fillRect(0,0,W,H);}
+
 }
 window.renderFrame=renderFrame;window.FPS=FPS;
 TIMING=window.TIMINGDATA;build();
