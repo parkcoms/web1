@@ -44,12 +44,12 @@ def mk(kind, dur=0):
         k = 8 if kind == 'rise' else 14; y = lp(x, k) - lp(x, k * 6)
         return {'whoosh': .55, 'swoosh': .45, 'rise': .25}[kind] * y * np.sin(np.pi * t) ** 2 * 4
     if kind == 'type':
-        L = int(dur * SR); y = np.zeros(L); t0 = 0
+        dur = dur or .4; L = int(dur * SR); y = np.zeros(L); t0 = 0
         while t0 < dur - .03:
             s = int(t0 * SR); c = mk('click') * rng.uniform(.4, .8); e = min(L, s + len(c)); y[s:e] += c[:e - s]; t0 += rng.uniform(.06, .11)
         return y * .8
     if kind == 'scribble':
-        L = int(dur * SR); t = np.arange(L) / SR; x = lp(noise(L), 4) - lp(noise(L), 30)
+        dur = dur or .4; L = int(dur * SR); t = np.arange(L) / SR; x = lp(noise(L), 4) - lp(noise(L), 30)
         return .35 * x * (.5 + .5 * np.abs(np.sin(t * 2 * np.pi * 7))) * np.minimum(1, (dur - t) * 10)
     if kind == 'beep':
         L = int(.22 * SR); t = np.arange(L) / SR
