@@ -71,7 +71,7 @@ Make new icons in the same flat style (2–3 colours from `C`, rounded rects, 8�
 
 ## 4. Recipes by content type
 
-**Hook (frame 0)** – big title already visible (`P(t,-.2,.1)`), hazard bands or a character with a bubble, then the promise ("핵심 n가지") as numbered tiles that pop in on the number word. Thumbnail is usually taken here.
+**Hook (frame 0)** – the viewer's situation, already visible (`P(t,-.2,.1)`): the document or moment they recognise (출석요구서, 해고통지서, 급여명세서, a character with a bubble) plus the question in big type; date/law name only as a small chip. The first spoken line is that ≤15-character question; the promise ("기업이 준비할 4가지") follows within 5 s as numbered tiles popping on the number word. Hook scene ≤ 4.5 s. Thumbnail is usually taken here.
 
 **Law change / "before → after"** – grey row for the existing rule, then a yellow-outlined row sliding in with "+ 새 요건" and a `newBadge`, the panel `glow`ing on the key word. Effective date as the `eff` chip in the title row.
 
