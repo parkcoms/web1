@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>산안법 개정 쇼츠</title>
+<style>
+@font-face{font-family:P;font-weight:500;src:url(../src/fonts/Pretendard-Medium.woff2)}
+@font-face{font-family:P;font-weight:700;src:url(../src/fonts/Pretendard-Bold.woff2)}
+@font-face{font-family:P;font-weight:800;src:url(../src/fonts/Pretendard-ExtraBold.woff2)}
+@font-face{font-family:P;font-weight:900;src:url(../src/fonts/Pretendard-Black.woff2)}
+html,body{margin:0;background:#000}
+canvas{display:block;margin:0 auto;height:100vh;width:auto}
+</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script src="timing.js"></script>
+<script>
+const W=1080,H=1920,FPS=30;
+const main=document.getElementById('c'),mctx=main.getContext('2d');
+const offA=new OffscreenCanvas(W,H),offB=new OffscreenCanvas(W,H);
+const actxA=offA.getContext('2d'),actxB=offB.getContext('2d');
+let ctx=mctx;
+const C={bg:'#11151C',bg2:'#171C25',panel:'#1D2430',panel2:'#263040',line:'#33405280',
+  yellow:'#FFC629',yellowD:'#C99A10',orange:'#FF8A1F',red:'#FF4B4B',green:'#34D399',blue:'#5AA9FF',
+  white:'#F3F5F8',muted:'#8B96A8',ink:'#11151C',skin:'#F3D3B8',skinS:'#E6BC9C',hair:'#2E241D',navy:'#2C4767'};
+let TIMING=null; // {W, CLIP} loaded from timing.json
+
+/* ---------- utils ---------- */
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const P=(t,a,b)=>clamp((t-a)/(b-a));
+const eo=t=>1-Math.pow(1-t,3);
+const eio=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eb=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)};
+function font(w,s){ctx.font=`${w} ${s}px P`;}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);}
+function txt(s,x,y,{w=800,size=48,color=C.white,align='left',ls=0,alpha=1,base='alphabetic'}={}){
+  ctx.save();ctx.globalAlpha*=alpha;font(w,size);ctx.fillStyle=color;ctx.textAlign=align;ctx.textBaseline=base;
+  ctx.letterSpacing=ls+'px';ctx.fillText(s,x,y);ctx.restore();}
+function tw(s,w,size,ls=0){ctx.save();font(w,size);ctx.letterSpacing=ls+'px';const m=ctx.measureText(s).width;ctx.restore();return m;}
+function rise(p,dy=40){return {a:eo(p),y:(1-eo(p))*dy};}
+function pop(p){return p<=0?0:eb(p);}
+function withT(x,y,s,a,fn){ctx.save();ctx.globalAlpha*=a;ctx.translate(x,y);ctx.scale(s,s);fn();ctx.restore();}
+function hl(x,y,w,h,p,color=C.yellow,alpha=1){if(p<=0)return;ctx.save();ctx.fillStyle=color;ctx.globalAlpha*=alpha;rr(x,y,w*eo(p),h,8);ctx.fill();ctx.restore();}
+function panel(x,y,w,h,{fill=C.panel,r=28,stroke=C.line,glow=0}={}){ctx.save();
+  if(glow>0){ctx.shadowColor=`rgba(255,198,41,${.45*glow})`;ctx.shadowBlur=50*glow;}
+  else{ctx.shadowColor='rgba(0,0,0,.35)';ctx.shadowBlur=30;ctx.shadowOffsetY=12;}
+  ctx.fillStyle=fill;rr(x,y,w,h,r);ctx.fill();ctx.shadowColor='transparent';ctx.strokeStyle=glow>0?`rgba(255,198,41,${.9*glow})`:stroke;ctx.lineWidth=glow>0?4:2;ctx.stroke();ctx.restore();}
+function chip(x,y,s,{bg=C.panel2,fg=C.white,size=34,w=800,align='center',padX=26,h=null}={}){font(w,size);const tw_=ctx.measureText(s).width+padX*2,hh=h||size*1.7;
+  const x0=align==='center'?x-tw_/2:align==='right'?x-tw_:x;ctx.fillStyle=bg;rr(x0,y-hh/2,tw_,hh,hh/2);ctx.fill();
+  ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(s,x0+tw_/2,y+2);return tw_;}
+function newBadge(x,y,p,label='NEW'){if(p<=0)return;withT(x,y,pop(p),1,()=>{ctx.rotate(-.08);chip(0,0,label,{bg:C.red,fg:'#fff',size:28,w:900,padX:18});});}
+// hazard stripes clipped into a rect
+function hazard(x,y,w,h,off=0,a=1,c1=C.yellow,c2='#111'){ctx.save();ctx.globalAlpha*=a;ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+  ctx.fillStyle=c2;ctx.fillRect(x,y,w,h);ctx.fillStyle=c1;const s=60;
+  for(let k=-h-s*2+(off%(s*2));k<w+h;k+=s*2){ctx.beginPath();ctx.moveTo(x+k,y+h);ctx.lineTo(x+k+s,y+h);ctx.lineTo(x+k+s+h,y);ctx.lineTo(x+k+h,y);ctx.closePath();ctx.fill();}
+  ctx.restore();}
+function arrow(x1,y1,x2,y2,p,{color=C.yellow,wd=10,head=26,dash=false}={}){if(p<=0)return;const x=lerp(x1,x2,eo(p)),y=lerp(y1,y2,eo(p));
+  ctx.save();ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=wd;ctx.lineCap='round';if(dash)ctx.setLineDash([18,16]);
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x,y);ctx.stroke();ctx.setLineDash([]);
+  const a=Math.atan2(y2-y1,x2-x1);ctx.beginPath();ctx.moveTo(x+Math.cos(a)*6,y+Math.sin(a)*6);
+  ctx.lineTo(x-Math.cos(a-.5)*head,y-Math.sin(a-.5)*head);ctx.lineTo(x-Math.cos(a+.5)*head,y-Math.sin(a+.5)*head);ctx.closePath();ctx.fill();ctx.restore();}
+function checkMark(x,y,s,p,color=C.green){if(p<=0)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=10*s;ctx.lineCap='round';ctx.lineJoin='round';
+  const pts=[[x-22*s,y],[x-6*s,y+16*s],[x+24*s,y-18*s]];const L1=Math.hypot(16,16),L2=Math.hypot(30,34),tot=L1+L2;const d=eo(p)*tot;
+  ctx.beginPath();ctx.moveTo(...pts[0]);if(d<=L1){const k=d/L1;ctx.lineTo(lerp(pts[0][0],pts[1][0],k),lerp(pts[0][1],pts[1][1],k));}
+  else{ctx.lineTo(...pts[1]);const k=(d-L1)/L2;ctx.lineTo(lerp(pts[1][0],pts[2][0],k),lerp(pts[1][1],pts[2][1],k));}ctx.stroke();ctx.restore();}
+function burst(x,y,p,color=C.yellow,r0=40,r1=90,n=8){if(p<=0||p>=1)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=7;ctx.lineCap='round';
+  const a=eo(p);for(let i=0;i<n;i++){const ang=i*Math.PI*2/n;const ra=lerp(r0,r1,a),rb=lerp(r0,r1,Math.min(1,a+.35));
+    ctx.globalAlpha=1-p;ctx.beginPath();ctx.moveTo(x+Math.cos(ang)*ra,y+Math.sin(ang)*ra);ctx.lineTo(x+Math.cos(ang)*rb,y+Math.sin(ang)*rb);ctx.stroke();}ctx.restore();}
+function stamp(x,y,label,p,{color=C.red,size=56,rot=-.12,w=null}={}){if(p<=0)return;const s=lerp(1.9,1,eo(p));withT(x,y,s,clamp(p*2),()=>{ctx.rotate(rot);font(900,size);
+  const ww=w||ctx.measureText(label).width+60;ctx.strokeStyle=color;ctx.lineWidth=8;rr(-ww/2,-size*.85,ww,size*1.7,16);ctx.stroke();
+  ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,0,4);});}
+function countUp(v,p){return Math.round(v*eo(p));}
+
+/* ---------- pictograms ---------- */
+function worker(x,y,s,{color=C.white,hat=C.yellow,run=null,alpha=1,stopHand=false}={}){ctx.save();ctx.globalAlpha*=alpha;ctx.translate(x,y);ctx.scale(s,s);
+  ctx.fillStyle=color;ctx.strokeStyle=color;ctx.lineCap='round';ctx.lineWidth=22;
+  const ph=run===null?0:run;const sw=Math.sin(ph)*.7;
+  // legs
+  ctx.beginPath();ctx.moveTo(0,40);ctx.lineTo(Math.sin(sw)*60,120);ctx.moveTo(0,40);ctx.lineTo(-Math.sin(sw)*60,120);ctx.stroke();
+  // body
+  ctx.beginPath();ctx.moveTo(0,-30);ctx.lineTo(run===null?0:12,40);ctx.stroke();
+  // arms
+  if(stopHand){ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(56,-62);ctx.moveTo(0,-20);ctx.lineTo(-34,22);ctx.stroke();
+    ctx.beginPath();ctx.ellipse(66,-78,20,26,-.6,0,7);ctx.fill();}
+  else{ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(-Math.sin(sw)*50,30);ctx.moveTo(0,-20);ctx.lineTo(Math.sin(sw)*50,30);ctx.stroke();}
+  // head + hard hat
+  ctx.beginPath();ctx.arc(0,-62,26,0,7);ctx.fill();
+  ctx.fillStyle=hat;ctx.beginPath();ctx.arc(0,-70,30,Math.PI,0);ctx.fill();ctx.fillRect(-40,-72,80,10);
+  ctx.restore();}
+function stopSign(x,y,r,p){if(p<=0)return;withT(x,y,pop(p),1,()=>{ctx.fillStyle=C.red;ctx.beginPath();for(let i=0;i<8;i++){const a=Math.PI/8+i*Math.PI/4;ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);}ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#fff';ctx.lineWidth=r*.07;ctx.stroke();txt('STOP',0,r*.2,{w:900,size:r*.5,color:'#fff',align:'center'});});}
+function exitSign(x,y,s,p){if(p<=0)return;withT(x,y,s*pop(p),1,()=>{ctx.fillStyle=C.green;rr(-90,-55,180,110,14);ctx.fill();
+  ctx.fillStyle='#fff';worker(-30,6,.32,{color:'#fff',hat:'#fff',run:4});ctx.strokeStyle='#fff';ctx.lineWidth=10;ctx.beginPath();ctx.moveTo(30,0);ctx.lineTo(70,0);ctx.moveTo(56,-14);ctx.lineTo(70,0);ctx.lineTo(56,14);ctx.stroke();});}
+function building(x,y,w,h,label,{color=C.panel2,accent=C.blue}={}){ctx.fillStyle=color;rr(x,y,w,h,14);ctx.fill();ctx.fillStyle=accent;rr(x,y,w,16,[14,14,0,0]);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.12)';for(let r=0;r<2;r++)for(let c=0;c<5;c++)rr(x+24+c*((w-48)/5),y+36+r*36,(w-48)/5-14,22,4),ctx.fill();
+  txt(label,x+w/2,y+h-22,{w:900,size:40,align:'center'});}
+function crane(x,y,s,t){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.strokeStyle=C.yellow;ctx.lineWidth=10;ctx.lineJoin='round';
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-260);ctx.lineTo(260,-260);ctx.moveTo(0,-260);ctx.lineTo(-80,-260);ctx.moveTo(0,-300);ctx.lineTo(0,-260);ctx.stroke();
+  for(let i=0;i<6;i++){ctx.beginPath();ctx.moveTo(-14,-i*44);ctx.lineTo(14,-i*44-22);ctx.stroke();}
+  const hx=150+Math.sin(t*1.2)*60;ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(hx,-260);ctx.lineTo(hx,-140);ctx.stroke();ctx.fillStyle=C.orange;rr(hx-30,-140,60,40,6);ctx.fill();
+  ctx.fillStyle=C.yellow;rr(-110,-275,60,40,6);ctx.fill();ctx.restore();}
+function thermo(x,y,s,lvl){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle='#fff';rr(-18,-90,36,130,18);ctx.fill();ctx.beginPath();ctx.arc(0,50,32,0,7);ctx.fill();
+  ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(0,50,22,0,7);ctx.fill();rr(-9,50-120*lvl,18,120*lvl,9);ctx.fill();ctx.restore();}
+function snow(x,y,s,rot){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.rotate(rot);ctx.strokeStyle=C.blue;ctx.lineWidth=10;ctx.lineCap='round';
+  for(let i=0;i<6;i++){ctx.save();ctx.rotate(i*Math.PI/3);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-70);ctx.moveTo(0,-42);ctx.lineTo(-18,-58);ctx.moveTo(0,-42);ctx.lineTo(18,-58);ctx.stroke();ctx.restore();}ctx.restore();}
+function coin(x,y,r,label='₩'){ctx.fillStyle=C.yellow;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();ctx.strokeStyle=C.yellowD;ctx.lineWidth=r*.12;ctx.beginPath();ctx.arc(x,y,r*.78,0,7);ctx.stroke();
+  txt(label,x,y+r*.32,{w:900,size:r*.9,color:C.yellowD,align:'center'});}
+function megaphone(x,y,s,t){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.rotate(-.2);ctx.fillStyle=C.white;
+  ctx.beginPath();ctx.moveTo(-60,-30);ctx.lineTo(50,-80);ctx.lineTo(50,80);ctx.lineTo(-60,30);ctx.closePath();ctx.fill();rr(-90,-30,34,60,8);ctx.fill();
+  ctx.fillStyle=C.red;rr(-60,30,30,60,8);ctx.fill();ctx.strokeStyle=C.yellow;ctx.lineWidth=8;ctx.lineCap='round';
+  for(let i=0;i<3;i++){const a=(t*2+i/3)%1;ctx.globalAlpha=1-a;ctx.beginPath();ctx.arc(60,0,40+a*80,-.6,.6);ctx.stroke();}ctx.restore();}
+function gear(x,y,r,rot,color=C.muted){ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.fillStyle=color;
+  for(let i=0;i<10;i++){ctx.save();ctx.rotate(i*Math.PI/5);rr(-r*.16,-r*1.18,r*.32,r*.4,4);ctx.fill();ctx.restore();}
+  ctx.beginPath();ctx.arc(0,0,r*.9,0,7);ctx.fill();ctx.fillStyle=C.bg2;ctx.beginPath();ctx.arc(0,0,r*.35,0,7);ctx.fill();ctx.restore();}
+function ship(x,y,s,t){ctx.save();ctx.translate(x,y+Math.sin(t*2)*6);ctx.scale(s,s);
+  const cols=[C.orange,C.blue,C.green,C.red,C.yellow];for(let i=0;i<5;i++){ctx.fillStyle=cols[i];rr(-150+i*62,-90,56,46,4);ctx.fill();}
+  for(let i=0;i<3;i++){ctx.fillStyle=cols[(i+2)%5];rr(-88+i*62,-140,56,46,4);ctx.fill();}
+  ctx.fillStyle=C.white;ctx.beginPath();ctx.moveTo(-200,-40);ctx.lineTo(200,-40);ctx.lineTo(160,30);ctx.lineTo(-170,30);ctx.closePath();ctx.fill();
+  ctx.strokeStyle=C.blue;ctx.lineWidth=6;ctx.beginPath();for(let k=-240;k<=240;k+=20)ctx.lineTo(k,48+Math.sin(k*.05+t*4)*6);ctx.stroke();ctx.restore();}
+function lockIcon(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.strokeStyle='#fff';ctx.lineWidth=12;ctx.beginPath();ctx.arc(0,-20,30,Math.PI,0);ctx.stroke();
+  ctx.fillStyle='#fff';rr(-46,-20,92,70,12);ctx.fill();ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(0,10,10,0,7);ctx.fill();ctx.restore();}
+function govIcon(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle=C.white;ctx.beginPath();ctx.moveTo(-70,-30);ctx.lineTo(0,-70);ctx.lineTo(70,-30);ctx.closePath();ctx.fill();
+  for(let i=0;i<4;i++)rr(-56+i*36,-24,20,64,3),ctx.fill();rr(-78,42,156,16,4);ctx.fill();ctx.restore();}
+function personIcon(x,y,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y-r*.9,r*.55,0,7);ctx.fill();ctx.beginPath();ctx.ellipse(x,y+r*.55,r*.95,r*.75,0,Math.PI,0);ctx.fill();}
+
+/* flat lawyer character (reused style) */
+function lawyer(x,y,s,{talk=0,t=0,arm=null}={}){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.beginPath();ctx.rect(-400,-400,800,700);ctx.clip();
+  const top=C.navy,br=1+Math.sin(t*2.3)*.012;
+  ctx.save();ctx.translate(0,95);ctx.scale(1,br);ctx.translate(0,-95);ctx.fillStyle=top;rr(-150,95,300,320,[120,120,30,30]);ctx.fill();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(-48,95);ctx.lineTo(48,95);ctx.lineTo(0,215);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#2F5FA8';ctx.beginPath();ctx.moveTo(-12,108);ctx.lineTo(12,108);ctx.lineTo(18,200);ctx.lineTo(0,222);ctx.lineTo(-18,200);ctx.closePath();ctx.fill();ctx.restore();
+  ctx.fillStyle=C.skinS;rr(-22,55,44,52,10);ctx.fill();
+  ctx.fillStyle=C.skin;ctx.beginPath();ctx.ellipse(0,0,70,80,0,0,7);ctx.fill();ctx.beginPath();ctx.ellipse(-70,8,12,18,0,0,7);ctx.ellipse(70,8,12,18,0,0,7);ctx.fill();
+  ctx.fillStyle=C.hair;ctx.beginPath();ctx.moveTo(-74,0);ctx.quadraticCurveTo(-82,-92,0,-92);ctx.quadraticCurveTo(84,-92,74,0);ctx.quadraticCurveTo(66,-40,20,-44);ctx.quadraticCurveTo(-30,-30,-60,-40);ctx.quadraticCurveTo(-72,-24,-74,0);ctx.fill();
+  ctx.fillStyle=C.ink;ctx.beginPath();ctx.ellipse(-25,12,8,11,0,0,7);ctx.ellipse(25,12,8,11,0,0,7);ctx.fill();
+  ctx.strokeStyle='#222';ctx.lineWidth=4;ctx.beginPath();ctx.roundRect(-48,-4,40,32,9);ctx.roundRect(8,-4,40,32,9);ctx.moveTo(-8,8);ctx.lineTo(8,8);ctx.stroke();
+  ctx.strokeStyle=C.hair;ctx.lineWidth=6;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-40,-16);ctx.lineTo(-12,-18);ctx.moveTo(40,-16);ctx.lineTo(12,-18);ctx.stroke();
+  if(talk>.05){ctx.fillStyle='#7A3B30';ctx.beginPath();ctx.ellipse(0,46,12+3*talk,3+12*talk,0,0,7);ctx.fill();}
+  else{ctx.strokeStyle='#8A4B3B';ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,36,16,.15*Math.PI,.85*Math.PI);ctx.stroke();}
+  if(arm!==null){ctx.save();ctx.translate(118,150);ctx.rotate(arm);ctx.fillStyle=top;rr(-30,-10,60,170,30);ctx.fill();ctx.fillStyle='#fff';rr(-30,140,60,22,8);ctx.fill();
+    ctx.fillStyle=C.skin;ctx.beginPath();ctx.ellipse(0,190,30,36,0,0,7);ctx.fill();ctx.beginPath();ctx.ellipse(-24,172,10,22,-.5,0,7);ctx.fill();ctx.restore();}
+  ctx.restore();}
+function flap(t,a,b){if(t<a||t>b)return 0;return Math.abs(Math.sin((t-a)*13))*(.55+.45*Math.sin(t*5.3));}
+
+/* item header: giant number + title */
+function itemHead(t,n,title,t0,tTitle,{sub=null,tSub=0,eff=null}={}){
+  const p=P(t,t0,t0+.35);if(p<=0)return;
+  const num=String(n).padStart(2,'0'),nw=tw(num,900,140);
+  ctx.save();ctx.globalAlpha=clamp(p*2);const s=lerp(1.6,1,eo(p));
+  ctx.translate(90+nw/2,310);ctx.scale(s,s);
+  font(900,140);ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=5;ctx.strokeStyle=C.yellow;ctx.strokeText(num,0,0);
+  ctx.restore();
+  const tx=90+nw+34;
+  const p2=P(t,tTitle,tTitle+.35);if(p2>0){const r=rise(p2,30);txt(title,tx,sub?312:336+0,{w:900,size:62,alpha:r.a,ls:-1});}
+  if(sub){const p3=P(t,tSub,tSub+.35);if(p3>0){const r=rise(p3,20);txt(sub,tx+2,362+r.y,{w:700,size:30,color:C.muted,alpha:r.a});}}
+  const hp=clamp(P(t,t0+.2,t0+.6));
+  if(eff){const p4=P(t,t0+.3,t0+.7);hazard(90,404,560,10,t*60,hp);
+    if(p4>0){ctx.save();ctx.globalAlpha=eo(p4);chip(990,409,eff,{bg:'rgba(255,198,41,.16)',fg:C.yellow,size:28,align:'right',padX:20});ctx.restore();}}
+  else hazard(90,404,900,10,t*60,hp);
+}
+
+/* ---------- background ---------- */
+function bg(t){const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0F131A');g.addColorStop(1,'#151B25');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(90,169,255,.05)';ctx.lineWidth=2;const o=(t*10)%80;
+  for(let x=0;x<=W;x+=80){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=-o;y<=H;y+=80){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}}
+function header(T,item){txt('산업안전보건법 개정 · 핵심 6',W/2,104,{w:800,size:28,color:C.muted,align:'center',ls:2});
+  if(item<0)return;const n=6,gap=96,x0=W/2-gap*(n-1)/2;
+  for(let i=0;i<n;i++){const on=i+1===item,done=i+1<item;ctx.fillStyle=on?C.yellow:done?'rgba(255,198,41,.35)':'rgba(255,255,255,.08)';
+    ctx.beginPath();ctx.arc(x0+i*gap,150,on?24:19,0,7);ctx.fill();txt(String(i+1),x0+i*gap,161,{w:900,size:on?28:22,color:on?C.ink:done?C.ink:C.muted,align:'center'});
+    if(i<n-1){ctx.fillStyle=done||on?'rgba(255,198,41,.35)':'rgba(255,255,255,.08)';ctx.fillRect(x0+i*gap+26,148,gap-52,4);}}}
+
+/* ---------- scenes ---------- */
+const S=[];
+// 1. Hook — on screen from frame 0
+S.push({item:-1,lead:.1,tail:.55,f(t,e){
+  hazard(0,250,1080,34,t*80,1);hazard(0,1660,1080,34,-t*80,1);
+  const t0=-.2,p1=P(t,t0,t0+.3);
+  withT(540,560,lerp(1.4,1,eo(p1)),clamp(p1*2),()=>{txt('산업안전보건법',0,0,{w:900,size:118,align:'center',ls:-3});});
+  const p2=P(t,e.w('개정안이')-.1,e.w('개정안이')+.25);
+  withT(540,700,lerp(1.4,1,eo(p2)),clamp(p2*2),()=>{const w=tw('개정안',900,118,-3);hl(-w/2-16,-50,w+32,60,P(t,e.w('개정안이'),e.w('개정안이')+.4));txt('개정안',0,0,{w:900,size:118,align:'center',ls:-3,color:C.white});});
+  stamp(540,900,'국회 본회의 통과',P(t,e.w('통과했습니다.'),e.w('통과했습니다.')+.25),{color:C.green,size:64});
+  txt('2026. 10. 1.',540,1010,{w:700,size:36,color:C.muted,align:'center',alpha:P(t,e.w('통과했습니다.')+.2,e.w('통과했습니다.')+.6)});
+  // six numbered tiles
+  const k0=e.w('여섯')-.15;
+  const labels=['안전한일터\n위원회','작업중지\n확대','건설\n현장','과징금\n신설','신고\n포상금','안전인증\n면제'];
+  labels.forEach((lb,i)=>{const p=P(t,k0+i*.09,k0+.35+i*.09);if(p<=0)return;const col=i%3,row=Math.floor(i/3);
+    const x=110+col*300,y=1130+row*250;withT(x+130,y+105,pop(p),1,()=>{panel(-130,-105,260,210,{r:24,fill:C.panel});
+      txt(String(i+1).padStart(2,'0'),-104,-52,{w:900,size:44,color:C.yellow});
+      lb.split('\n').forEach((l,j)=>txt(l,-104,10+j*46,{w:800,size:38}));});});
+},sfx:e=>[['thud',0],['pop',e.w('개정안이')-.1],['stamp',e.w('통과했습니다.')+.05],['tick',e.w('여섯')-.15],['tick',e.w('여섯')-.06],['tick',e.w('여섯')+.03],['tick',e.w('여섯')+.12],['tick',e.w('여섯')+.21],['tick',e.w('여섯')+.3]]});
+
+// 2. Committee
+S.push({item:1,lead:.3,tail:.55,f(t,e){
+  itemHead(t,1,'안전한일터위원회',0,e.w('안전한일터위원회.')-.1,{sub:'고용노동부에 설치 · 노사정 정책 심의',tSub:e.w('고용노동부에')-.1,eff:'공포 3개월 후 시행'});
+  const cx=540,cy=930,R=300;
+  // ring
+  const pr=P(t,e.w('노사정과')-.3,e.w('노사정과'));
+  if(pr>0){ctx.save();ctx.strokeStyle='rgba(255,198,41,.25)';ctx.lineWidth=4;ctx.setLineDash([14,14]);ctx.lineDashOffset=-t*30;ctx.beginPath();ctx.arc(cx,cy,R,-Math.PI/2,-Math.PI/2+Math.PI*2*eo(pr));ctx.stroke();ctx.restore();}
+  const nodes=[['노','노동자 대표',-90,C.blue,e.w('노사정과')],['사','사업주 대표',0,C.orange,e.w('노사정과')+.18],['정','정부',90,C.green,e.w('노사정과')+.36],['전문가','산업안전·보건 전문가',180,C.yellow,e.w('전문가가')]];
+  const sim=e.w('심의하는');
+  nodes.forEach(([lab,desc,deg,col,ti])=>{const p=P(t,ti,ti+.35);if(p<=0)return;const a=deg*Math.PI/180,x=cx+Math.cos(a)*R,y=cy+Math.sin(a)*R;
+    const lp=P(t,sim-.2,sim+.3);if(lp>0){ctx.save();ctx.strokeStyle=col;ctx.globalAlpha=.7;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(lerp(x,cx,eo(lp)*.62),lerp(y,cy,eo(lp)*.62));ctx.stroke();ctx.restore();}
+    withT(x,y,pop(p)*(1+.04*Math.sin(t*3+deg)),1,()=>{ctx.fillStyle=col;ctx.beginPath();ctx.arc(0,0,lab.length>1?92:78,0,7);ctx.fill();
+      txt(lab,0,lab.length>1?14:22,{w:900,size:lab.length>1?44:66,color:C.ink,align:'center'});});
+    txt(desc,x,y+(deg===90?150:deg===-90?-118:120),{w:700,size:30,color:C.muted,align:'center',alpha:eo(p)});});
+  const pc=P(t,sim-.1,sim+.3);if(pc>0)withT(cx,cy,pop(pc),1,()=>{ctx.fillStyle=C.panel2;ctx.beginPath();ctx.arc(0,0,150,0,7);ctx.fill();ctx.strokeStyle=C.yellow;ctx.lineWidth=5;ctx.stroke();
+    txt('산재 예방',0,-14,{w:900,size:44,align:'center'});txt('정책 심의',0,44,{w:900,size:44,align:'center',color:C.yellow});});
+  const pf=P(t,e.w('고용노동부에'),e.w('고용노동부에')+.4);if(pf>0){ctx.save();ctx.globalAlpha=eo(pf);
+    chip(540,1440,'위원장 고용노동부장관 · 위원 20명 이내',{bg:C.panel2,fg:C.white,size:32,w:700});ctx.restore();}
+},sfx:e=>[['thud',0],['whoosh',e.w('안전한일터위원회.')-.1],['pop',e.w('노사정과')],['pop',e.w('노사정과')+.18],['pop',e.w('노사정과')+.36],['pop',e.w('전문가가')],['ding',e.w('심의하는')-.1],['rise',e.w('고용노동부에')]]});
+
+// 3. Work stoppage (1)
+S.push({item:2,lead:.3,tail:.5,f(t,e){
+  itemHead(t,2,'작업중지 확대',0,e.w('작업중지가')-.1,{sub:'노동자·근로자대표·명예산업안전감독관',tSub:e.w('작업중지가')+.4,eff:'공포 6개월 후 시행'});
+  // panel A: conditions
+  const pa=P(t,e.w('급박한')-.2,e.w('급박한')+.2),ra=rise(pa,40);
+  if(pa>0){ctx.save();ctx.globalAlpha=ra.a;ctx.translate(0,ra.y);
+    panel(70,450,940,400,{glow:P(t,e.w('우려되는'),e.w('우려되는')+.3)*(1-P(t,e.w('하청')-.3,e.w('하청')))});
+    txt('작업중지·대피할 수 있는 경우',110,520,{w:800,size:34,color:C.muted});
+    ctx.fillStyle='rgba(255,255,255,.06)';rr(110,560,860,110,18);ctx.fill();
+    checkMark(160,612,1,P(t,e.w('급박한'),e.w('급박한')+.3));txt('급박한 위험이 있을 때',210,632,{w:800,size:46});
+    const pn=P(t,e.w('우려되는')-.1,e.w('우려되는')+.25);if(pn>0){ctx.save();ctx.translate((1-eo(pn))*120,0);ctx.globalAlpha*=eo(pn);
+      ctx.fillStyle='rgba(255,198,41,.16)';rr(110,700,860,110,18);ctx.fill();ctx.strokeStyle=C.yellow;ctx.lineWidth=4;ctx.stroke();
+      txt('+',160,772,{w:900,size:60,color:C.yellow,align:'center'});txt('위험이 우려되는 경우에도',210,772,{w:900,size:46,color:C.yellow});ctx.restore();
+      newBadge(920,700,P(t,e.w('우려되는')+.15,e.w('우려되는')+.5));}
+    ctx.restore();}
+  // worker stops & evacuates
+  const pw=P(t,e.w('노동자는')-.2,e.w('노동자는')+.2);
+  if(pw>0){const run=t>e.w('대피할');const rx=run?lerp(250,700,eio(P(t,e.w('대피할'),e.w('있습니다.')+.3))):250;
+    worker(rx,1030,.95,{alpha:eo(pw),stopHand:!run&&t>e.w('멈추고')-.1,run:run?t*10:null});
+    if(t>e.w('멈추고')-.1&&!run)stopSign(420,960,70,P(t,e.w('멈추고')-.1,e.w('멈추고')+.2));
+    exitSign(860,980,1,P(t,e.w('대피할')-.15,e.w('대피할')+.2));}
+  // panel B: subcontractor -> principal
+  const ph=P(t,e.w('하청')-.15,e.w('하청')+.25),rh=rise(ph,40);
+  if(ph>0){ctx.save();ctx.globalAlpha=rh.a;ctx.translate(0,rh.y);
+    panel(70,1170,940,480,{});
+    const po=P(t,e.w('원청에')-.1,e.w('원청에')+.25);if(po>0){ctx.save();ctx.globalAlpha*=eo(po);building(560,1210,400,190,'원청',{accent:C.blue});ctx.restore();}
+    worker(240,1500,.8,{hat:C.orange});txt('하청 노동자',240,1630,{w:800,size:34,align:'center'});
+    arrow(330,1450,560,1320,P(t,e.w('직접'),e.w('작업중지를')+.1),{color:C.yellow,wd:12});
+    const pr_=P(t,e.w('작업중지를'),e.w('작업중지를')+.3);if(pr_>0)withT(640,1510,pop(pr_),1,()=>{chip(0,0,'작업중지 요구',{bg:C.yellow,fg:C.ink,size:40,w:900});});
+    burst(640,1510,P(t,e.w('요구할'),e.w('요구할')+.5),C.yellow,120,200,10);
+    ctx.restore();}
+},sfx:e=>[['thud',0],['whoosh',e.w('작업중지가')-.1],['rise',e.w('급박한')-.2],['check',e.w('급박한')],['swoosh',e.w('우려되는')-.1],['pop',e.w('우려되는')+.15],['beep',e.w('멈추고')-.1],['swoosh',e.w('대피할')],['rise',e.w('하청')-.15],['swoosh',e.w('직접')],['ding',e.w('작업중지를')]]});
+
+// 4. Minister order + no restart
+S.push({item:2,lead:.3,tail:.6,f(t,e){
+  const pa=P(t,0,.35),ra=rise(pa,40);
+  ctx.save();ctx.globalAlpha=ra.a;ctx.translate(0,ra.y);
+  panel(70,260,940,520,{});govIcon(170,370,.9);
+  txt('노동부장관 작업중지 명령',250,385,{w:900,size:46});
+  txt('명령할 수 있는 경우',110,480,{w:700,size:32,color:C.muted});
+  ctx.fillStyle='rgba(255,255,255,.06)';rr(110,510,860,96,16);ctx.fill();txt('중대재해가 발생한 경우',150,572,{w:800,size:40});
+  const pn=P(t,e.w('요건도')-.1,e.w('요건도')+.3);if(pn>0){ctx.save();ctx.globalAlpha*=eo(pn);ctx.translate((1-eo(pn))*100,0);
+    ctx.fillStyle='rgba(255,198,41,.16)';rr(110,626,860,120,16);ctx.fill();ctx.strokeStyle=C.yellow;ctx.lineWidth=4;ctx.stroke();
+    txt('+ 사고 부상으로 의식불명이거나',150,676,{w:800,size:36,color:C.yellow});txt('   생사가 분명하지 않은 경우 등',150,724,{w:800,size:36,color:C.yellow});ctx.restore();
+    newBadge(930,626,P(t,e.w('요건도')+.2,e.w('요건도')+.5));}
+  ctx.restore();
+  // chain
+  txt('시정조치 명령을 받은 사업주',540,880,{w:800,size:34,color:C.muted,align:'center',alpha:P(t,e.w('시정조치를')-.2,e.w('시정조치를')+.1)});
+  const steps=[['시정조치 미이행',e.w('시정조치를'),C.orange,'!'],['급박한 위험',e.w('급박한'),C.red,'⚠'],['시정 완료까지\n작업 재개 불가',e.w('재개할')-.3,C.red,'lock']];
+  steps.forEach(([lab,ti,col,ic],i)=>{const p=P(t,ti-.1,ti+.25);if(p<=0)return;const y=950+i*235;
+    withT(540,y+85,pop(p),1,()=>{const last=i===2;panel(-430,-85,860,170,{fill:last?'rgba(255,75,75,.18)':C.panel,stroke:last?C.red:C.line});
+      ctx.fillStyle=col;ctx.beginPath();ctx.arc(-340,0,52,0,7);ctx.fill();
+      if(ic==='lock')lockIcon(-340,4,.62);else txt(ic,-340,22,{w:900,size:60,color:'#fff',align:'center'});
+      lab.split('\n').forEach((l,j,a)=>txt(l,-250,(a.length>1?-12:16)+j*52,{w:900,size:46,color:last?'#FFD5D5':C.white}));});
+    if(i>0)arrow(540,y-70,540,y-8,P(t,ti-.25,ti),{color:C.muted,wd:8,head:20});});
+  const pb=P(t,e.w('없습니다.')-.2,e.w('없습니다.')+.2);if(pb>0)withT(540,1660,pop(pb),1,()=>{ctx.rotate(-.03);chip(0,0,'작업금지 의무 신설',{bg:C.yellow,fg:C.ink,size:36,w:900});});
+},sfx:e=>[['rise',0],['pop',e.w('요건도')-.1],['tick',e.w('시정조치를')-.1],['tick',e.w('급박한')-.1],['beep',e.w('재개할')-.4],['stamp',e.w('없습니다.')-.1]]});
+
+// 5. Construction: registration cancellation
+S.push({item:3,lead:.3,tail:.55,f(t,e){
+  itemHead(t,3,'건설 현장',0,e.w('건설')-.1,{sub:'사업 등록 말소·취소 요청 근거',tSub:e.w('현장.')+.2,eff:'공포 6개월 후 시행'});
+  crane(880,760,.9,t);
+  const pc=P(t,e.w('동시에')-.1,e.w('동시에')+.3);if(pc>0){ctx.save();ctx.globalAlpha=eo(pc);
+    panel(70,470,620,190,{});txt('안전·보건조치 위반으로',110,530,{w:700,size:32,color:C.muted});
+    for(let i=0;i<2;i++){const pp=P(t,e.w('두')+i*.12,e.w('두')+.3+i*.12);personIcon(140+i*80,615,34,pp>0?C.red:'rgba(255,255,255,.25)');}
+    txt('동시에 2명 이상 사망',300,628,{w:900,size:44});ctx.restore();}
+  // 3-year timeline with stamps
+  const pt=P(t,e.w('삼')-.1,e.w('삼')+.4);if(pt>0){ctx.save();ctx.globalAlpha=eo(pt);
+    txt('3년간',110,790,{w:900,size:50,color:C.yellow});
+    ctx.fillStyle='rgba(255,255,255,.12)';rr(110,830,860,14,7);ctx.fill();ctx.fillStyle=C.yellow;rr(110,830,860*eo(pt),14,7);ctx.fill();
+    ['1년','2년','3년'].forEach((l,i)=>txt(l,110+i*400+(i===2?60:0),890,{w:700,size:26,color:C.muted,align:i===0?'left':i===2?'right':'center'}));ctx.restore();}
+  const sx=[260,560],stT=[e.w('영업정지를'),e.w('두',1)];
+  sx.forEach((x,i)=>{const p=P(t,stT[i],stT[i]+.22);if(p<=0)return;ctx.save();stamp(x,1000,'영업정지',p,{color:C.red,size:46,rot:-.14+i*.08});ctx.restore();
+    txt(`${i+1}회`,x,1110,{w:800,size:30,color:C.muted,align:'center',alpha:p});});
+  const p3=P(t,e.w('다시')-.1,e.w('다시')+.3);if(p3>0){ctx.save();ctx.globalAlpha=eo(p3)*(.6+.4*Math.abs(Math.sin(t*5)));ctx.strokeStyle=C.orange;ctx.lineWidth=5;ctx.setLineDash([12,10]);
+    rr(740,950,190,100,16);ctx.stroke();ctx.restore();txt('또 대상',835,1013,{w:900,size:36,color:C.orange,align:'center',alpha:eo(p3)});}
+  // outcome
+  const po=P(t,e.w('사업')-.1,e.w('사업')+.3);if(po>0)withT(540,1330,pop(po),1,()=>{panel(-470,-150,940,300,{fill:'rgba(255,75,75,.16)',stroke:C.red});
+    txt('노동부장관 → 관계 행정기관',0,-70,{w:700,size:32,color:'#FFB3B3',align:'center'});
+    txt('사업 등록 말소 요청',0,30,{w:900,size:72,color:'#fff',align:'center',ls:-2});
+    hl(-tw('말소',900,72,-2)/2+60,40,tw('말소',900,72,-2),18,P(t,e.w('말소를'),e.w('말소를')+.3),C.red,.7);});
+  burst(540,1330,P(t,e.w('요청할'),e.w('요청할')+.5),C.red,300,420,12);
+},sfx:e=>[['thud',0],['whoosh',e.w('건설')-.1],['rise',e.w('동시에')-.1],['tick',e.w('두')],['tick',e.w('두')+.12],['swoosh',e.w('삼')-.1],['stamp',e.w('영업정지를')+.05],['stamp',e.w('두',1)+.05],['beep',e.w('다시')-.1],['thud',e.w('사업')]]});
+
+// 6. Construction: weather + safety cost
+S.push({item:3,lead:.3,tail:.6,f(t,e){
+  const pa=P(t,0,.35),ra=rise(pa,40);
+  ctx.save();ctx.globalAlpha=ra.a;ctx.translate(0,ra.y);
+  panel(70,260,940,560,{});
+  txt('건설공사 기간 연장 사유',110,335,{w:900,size:46});chip(990,322,'공포한 날부터 시행',{bg:'rgba(255,198,41,.14)',fg:C.yellow,size:26,align:'right',padX:18});
+  txt('기존: 태풍·홍수 등 악천후, 지진, 화재, 전염병 등',110,400,{w:700,size:30,color:C.muted});
+  const p1=P(t,e.w('폭염과')-.1,e.w('폭염과')+.3),p2=P(t,e.w('한파는')-.1,e.w('한파는')+.3);
+  if(p1>0)withT(300,600,pop(p1),1,()=>{ctx.fillStyle='rgba(255,75,75,.15)';ctx.beginPath();ctx.arc(0,0,130,0,7);ctx.fill();thermo(-10,-10,1,.55+.35*Math.sin(t*3)*.5+.2);txt('폭염',0,190,{w:900,size:52,align:'center',color:'#FF8A8A'});});
+  if(p2>0)withT(780,600,pop(p2),1,()=>{ctx.fillStyle='rgba(90,169,255,.15)';ctx.beginPath();ctx.arc(0,0,130,0,7);ctx.fill();snow(0,-6,1.05,t*.6);txt('한파',0,190,{w:900,size:52,align:'center',color:'#9CCBFF'});});
+  if(p2>0)txt('+',540,620,{w:900,size:90,color:C.yellow,align:'center',alpha:eo(p2)});
+  stamp(540,470,'명시',P(t,e.w('명시되고,'),e.w('명시되고,')+.25),{color:C.yellow,size:40,rot:.1});
+  ctx.restore();
+  // safety cost duty
+  const pc=P(t,e.w('산업안전보건관리비')-.2,e.w('산업안전보건관리비')+.2),rc=rise(pc,40);
+  if(pc>0){ctx.save();ctx.globalAlpha=rc.a;ctx.translate(0,rc.y);
+    panel(70,880,940,700,{});txt('산업안전보건관리비 계상 의무',110,955,{w:900,size:46});
+    txt('건설: 공포 6개월 후 · 건설 外: 공포 1년 후',110,1010,{w:700,size:28,color:C.muted});
+    coin(890,1130,48);
+    const rows=[['발주자','기존',e.w('계상')-.1,false],['도급인','확대',e.w('도급인과'),true],['다른 업종','확대',e.w('다른'),true]];
+    rows.forEach(([a,b,ti,nw],i)=>{const p=P(t,ti,ti+.3);if(p<=0)return;const y=1100+i*150;
+      ctx.save();ctx.globalAlpha*=eo(p);ctx.translate((1-eo(p))*80,0);
+      ctx.fillStyle=nw?'rgba(255,198,41,.16)':'rgba(255,255,255,.06)';rr(110,y,700,120,18);ctx.fill();if(nw){ctx.strokeStyle=C.yellow;ctx.lineWidth=3;ctx.stroke();}
+      txt((nw?'+ ':'')+a,150,y+78,{w:900,size:48,color:nw?C.yellow:C.white});chip(760,y+60,b,{bg:nw?C.yellow:C.panel2,fg:nw?C.ink:C.muted,size:28,align:'right',w:900,padX:18});ctx.restore();});
+    ctx.restore();}
+},sfx:e=>[['rise',0],['pop',e.w('폭염과')-.1],['pop',e.w('한파는')-.1],['stamp',e.w('명시되고,')+.05],['rise',e.w('산업안전보건관리비')-.2],['tick',e.w('계상')-.1],['ding',e.w('도급인과')],['ding',e.w('다른')]]});
+
+// 7. Penalty surcharge
+S.push({item:4,lead:.3,tail:.6,f(t,e){
+  itemHead(t,4,'과징금 신설',0,e.w('과징금.')-.1,{sub:'다수·반복 사망사고 발생 사업장',tSub:e.w('과징금.')+.4,eff:'공포 6개월 후 시행'});
+  const pa=P(t,e.w('안전보건조치')-.2,e.w('안전보건조치')+.2),ra=rise(pa,40);
+  if(pa>0){ctx.save();ctx.globalAlpha=ra.a;ctx.translate(0,ra.y);
+    panel(70,470,940,420,{});txt('안전·보건조치 의무 위반으로',110,540,{w:700,size:34,color:C.muted});
+    const py=P(t,e.w('일')-.1,e.w('일')+.3);if(py>0){withT(250,690,pop(py),1,()=>{ctx.fillStyle=C.panel2;rr(-130,-90,260,180,24);ctx.fill();
+      txt('1년',0,30,{w:900,size:86,align:'center',color:C.yellow});});}
+    for(let i=0;i<3;i++){const p=P(t,e.w('세')+i*.13,e.w('세')+.3+i*.13);personIcon(500+i*120,700,56,p>0?C.red:'rgba(255,255,255,.18)');if(p>0)burst(500+i*120,690,p,C.red,50,90,6);}
+    txt('3명 이상 사망',740,840,{w:900,size:46,align:'center',alpha:P(t,e.w('이상'),e.w('이상')+.3)});
+    ctx.restore();}
+  const pg=P(t,e.w('영업이익의')-.2,e.w('영업이익의')+.2),rg=rise(pg,40);
+  if(pg>0){ctx.save();ctx.globalAlpha=rg.a;ctx.translate(0,rg.y);
+    panel(70,950,940,620,{glow:P(t,e.w('오'),e.w('오')+.4)});txt('사업주에게 부과',110,1020,{w:700,size:34,color:C.muted});
+    txt('영업이익의',110,1110,{w:900,size:52});
+    const pn=P(t,e.w('오')-.05,e.w('오')+.5);
+    font(900,240);ctx.fillStyle=C.yellow;ctx.textAlign='left';ctx.fillText(countUp(5,pn)+'%',110,1360);
+    txt('이내',110+tw(countUp(5,pn)+'%',900,240)+24,1360,{w:900,size:64});
+    // gauge 0..100 with 5% marker
+    ctx.fillStyle='rgba(255,255,255,.1)';rr(110,1420,860,40,20);ctx.fill();ctx.fillStyle=C.yellow;rr(110,1420,Math.max(40,860*.05*eo(pn)),40,20);ctx.fill();
+    txt('0',110,1500,{w:700,size:24,color:C.muted});txt('100%',970,1500,{w:700,size:24,color:C.muted,align:'right'});
+    const pk=P(t,e.w('과징금이'),e.w('과징금이')+.3);if(pk>0)coin(860,1230,lerp(10,80,eb(pk)));
+    txt('징수된 과징금은 산재보험기금에 귀속',540,1545,{w:700,size:28,color:C.muted,align:'center',alpha:P(t,e.w('부과됩니다.'),e.w('부과됩니다.')+.4)});
+    ctx.restore();}
+},sfx:e=>[['thud',0],['whoosh',e.w('과징금.')-.1],['rise',e.w('안전보건조치')-.2],['pop',e.w('일')-.1],['beep',e.w('세')],['beep',e.w('세')+.13],['beep',e.w('세')+.26],['rise',e.w('영업이익의')-.2],['count',e.w('오')-.05,.5],['coin',e.w('과징금이')]]});
+
+// 8. Whistleblower reward
+S.push({item:5,lead:.3,tail:.6,f(t,e){
+  itemHead(t,5,'신고포상금 도입',0,e.w('다섯째,')+.3,{eff:'공포 3개월 후 시행'});
+  const pa=P(t,e.w('법령')-.2,e.w('법령')+.2);
+  if(pa>0){withT(300,760,pop(pa),1,()=>{ctx.fillStyle=C.panel;ctx.beginPath();ctx.arc(0,0,190,0,7);ctx.fill();megaphone(0,0,1.15,t);});
+    txt('법령·명령 위반 신고',300,1020,{w:900,size:42,align:'center',alpha:eo(pa)});}
+  arrow(510,760,650,760,P(t,e.w('신고한'),e.w('사람에게')),{color:C.yellow,wd:12});
+  const pr=P(t,e.w('포상금을')-.1,e.w('포상금을')+.3);
+  if(pr>0){withT(820,760,pop(pr),1,()=>{ctx.fillStyle='rgba(255,198,41,.15)';ctx.beginPath();ctx.arc(0,0,190,0,7);ctx.fill();
+      for(let i=0;i<4;i++)coin(-40+i*26,60-i*38,62);});
+    txt('포상금',820,1020,{w:900,size:52,align:'center',color:C.yellow,alpha:eo(pr)});
+    burst(820,760,P(t,e.w('포상금을'),e.w('포상금을')+.5),C.yellow,200,280,12);}
+  const pn=P(t,e.w('근거가')-.1,e.w('근거가')+.3);if(pn>0){ctx.save();ctx.globalAlpha=eo(pn);panel(70,1160,940,300,{});
+    txt('지급 근거 마련',110,1240,{w:900,size:46});
+    txt('정부: 하위법령으로 지급 기준 마련,',110,1310,{w:700,size:32,color:C.muted});
+    txt('법 시행일에 맞춰 지급 개시 계획',110,1360,{w:700,size:32,color:C.muted});ctx.restore();
+    checkMark(920,1230,1.2,P(t,e.w('생깁니다.'),e.w('생깁니다.')+.3));}
+},sfx:e=>[['thud',0],['pop',e.w('법령')-.2],['swoosh',e.w('신고한')],['coin',e.w('포상금을')-.1],['ding',e.w('포상금을')+.1],['check',e.w('생깁니다.')]]});
+
+// 9. Safety certification exemption
+S.push({item:6,lead:.3,tail:.6,f(t,e){
+  itemHead(t,6,'안전인증 면제 확대',0,e.w('여섯째,')+.3,{eff:'공포한 날부터 시행'});
+  const pa=P(t,.4,.8);if(pa>0){ctx.save();ctx.globalAlpha=eo(pa);panel(70,470,940,520,{});
+    txt('인증 면제 대상 (안전인증 대상 기계 등)',110,540,{w:700,size:32,color:C.muted});
+    [['연구·개발 목적 제조·수입'],['수출 목적 제조']].forEach(([l],i)=>{ctx.fillStyle='rgba(255,255,255,.06)';rr(110,575+i*120,860,100,16);ctx.fill();
+      checkMark(160,625+i*120,.9,1,C.muted);txt(l,210,642+i*120,{w:800,size:42,color:'#C9D1DC'});});
+    const pn=P(t,e.w('수입한')-.1,e.w('수입한')+.3);if(pn>0){ctx.save();ctx.globalAlpha*=eo(pn);ctx.translate((1-eo(pn))*100,0);
+      ctx.fillStyle='rgba(255,198,41,.16)';rr(110,815,860,120,16);ctx.fill();ctx.strokeStyle=C.yellow;ctx.lineWidth=4;ctx.stroke();
+      txt('+ 수출 목적 수입',160,895,{w:900,size:50,color:C.yellow});ctx.restore();newBadge(930,815,P(t,e.w('수입한')+.2,e.w('수입한')+.5));}
+    ctx.restore();}
+  const ps=P(t,e.w('수출')-.2,e.w('수출')+.2);if(ps>0){ctx.save();ctx.globalAlpha=eo(ps);ship(lerp(1300,560,eio(ps)),1250,1.3,t);ctx.restore();}
+  const pg=P(t,e.w('기계도')-.1,e.w('기계도')+.3);if(pg>0)withT(300,1190,pop(pg),1,()=>{gear(0,0,70,t*1.5,C.muted);});
+  stamp(540,1420,'인증 면제',P(t,e.w('면제받을'),e.w('면제받을')+.25),{color:C.green,size:56,rot:-.1});
+  txt('기업 행정·비용 부담 감소, 납품 기간 단축 기대',540,1520,{w:700,size:30,color:C.muted,align:'center',alpha:P(t,e.w('있습니다.'),e.w('있습니다.')+.4)});
+},sfx:e=>[['thud',0],['rise',.4],['swoosh',e.w('수출')-.2],['pop',e.w('기계도')-.1],['ding',e.w('수입한')+.1],['stamp',e.w('면제받을')+.05]]});
+
+// 10. Timeline + takeaway
+S.push({item:-1,lead:.3,tail:.6,f(t,e){
+  const ph=P(t,0,.35);txt('언제부터 시행되나',540,300,{w:900,size:66,align:'center',alpha:eo(ph),ls:-1});
+  hazard(90,340,900,10,t*60,eo(ph));
+  const nodes=[['공포한 날','공사 기간 연장 사유 · 안전인증 면제',e.w('공포한')],['3개월 후','안전한일터위원회 · 신고포상금',e.w('날부터')+.15],
+    ['6개월 후','작업중지 확대 · 등록 말소 · 과징금 · 산안비(건설)',e.w('일')],['1년 후','산안비 계상(건설 외)',e.w('후까지')]];
+  const x0=170,y0=440,gap=230;
+  const pl=P(t,e.w('공포한')-.1,e.w('후까지')+.3);ctx.fillStyle='rgba(255,255,255,.12)';rr(x0-5,y0,10,gap*3,5);ctx.fill();ctx.fillStyle=C.yellow;rr(x0-5,y0,10,gap*3*eo(pl),5);ctx.fill();
+  const hiT=e.w('작업중지');
+  nodes.forEach(([a,b,ti],i)=>{const p=P(t,ti-.1,ti+.25);if(p<=0)return;const y=y0+i*gap;
+    withT(x0,y,pop(p),1,()=>{ctx.fillStyle=C.yellow;ctx.beginPath();ctx.arc(0,0,26,0,7);ctx.fill();ctx.fillStyle=C.ink;ctx.beginPath();ctx.arc(0,0,10,0,7);ctx.fill();});
+    ctx.save();ctx.globalAlpha=eo(p);ctx.translate((1-eo(p))*60,0);
+    const hi=i===2?P(t,hiT,hiT+.3):0;panel(230,y-80,780,160,{glow:hi});
+    txt(a,270,y-14,{w:900,size:46,color:C.yellow});
+    const lines=b.length>18?[b.slice(0,b.indexOf('·',10)+1),b.slice(b.indexOf('·',10)+1).trim()]:[b];
+    lines.forEach((l,j)=>txt(l,270,y+36+j*36,{w:700,size:30,color:'#C9D1DC'}));ctx.restore();});
+  const pt=P(t,e.w('절차부터')-.2,e.w('절차부터')+.2);if(pt>0)withT(540,1430,pop(pt),1,()=>{panel(-470,-110,940,220,{fill:'rgba(255,198,41,.14)',stroke:C.yellow});
+    txt('기업 체크',-420,-36,{w:800,size:32,color:C.yellow});txt('작업중지 요구 대응 절차 점검',-420,40,{w:900,size:50});checkMark(380,10,1.4,P(t,e.w('점검해'),e.w('점검해')+.3),C.yellow);});
+  txt('* 시행일은 공포일 기준',540,1600,{w:700,size:26,color:C.muted,align:'center',alpha:P(t,1,1.5)});
+},sfx:e=>[['rise',0],['tick',e.w('공포한')-.1],['tick',e.w('날부터')+.05],['tick',e.w('일')-.1],['tick',e.w('후까지')-.1],['ding',e.w('작업중지')],['pop',e.w('절차부터')-.2],['check',e.w('점검해')]]});
+
+// 11. CTA
+S.push({item:-1,lead:.35,tail:1.3,min:4.6,noCap:true,f(t,e){
+  const p=P(t,0,.4),r=rise(p,60);
+  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+  ctx.fillStyle='rgba(255,198,41,.08)';ctx.beginPath();ctx.arc(540,820,330+Math.sin(t*1.4)*8,0,7);ctx.fill();
+  lawyer(540,720,1.05,{t,talk:flap(t,e.w('상생의'),e.end),arm:lerp(.2,-2.15,eo(P(t,.1,.6)))+Math.sin(t*3)*.1});
+  ctx.fillStyle=C.panel2;rr(70,1060,940,40,10);ctx.fill();
+  ctx.restore();
+  // recap icons
+  const lab=['위원회','작업중지','건설','과징금','포상금','인증'];
+  lab.forEach((l,i)=>{const pp=P(t,.3+i*.07,.6+i*.07);if(pp<=0)return;withT(165+i*150,1220,pop(pp),1,()=>{ctx.fillStyle=C.panel;ctx.beginPath();ctx.arc(0,0,58,0,7);ctx.fill();
+    txt(String(i+1),0,-6,{w:900,size:38,color:C.yellow,align:'center'});txt(l,0,32,{w:700,size:22,align:'center',color:'#C9D1DC'});});});
+  const pb=P(t,e.w('상생의')-.1,e.w('상생의')+.35);if(pb>0)withT(540,1390,pop(pb),1,()=>{ctx.fillStyle=C.yellow;rr(-380,-60,760,120,60);ctx.fill();
+    txt('상생의 노동법  |  박재우 변호사',0,14,{w:900,size:40,color:C.ink,align:'center'});});
+  txt('출처: 고용노동부 보도참고자료(2026.10.1.)',540,1520,{w:700,size:28,color:C.muted,align:'center',alpha:P(t,.6,1)});
+  txt('「산업재해 예방을 위한 노사의 역할 강화」',540,1565,{w:700,size:28,color:C.muted,align:'center',alpha:P(t,.6,1)});
+},sfx:e=>[['rise',0],['pop',e.w('상생의')-.1]]});
+
+/* ---------- captions (hand-picked breaks) ---------- */
+const CAPS=[
+ ['산업안전보건법 개정안이','국회를 통과했습니다','무엇이 바뀌는지','핵심 여섯 가지로 정리합니다'],
+ ['첫째','안전한일터위원회','노사정과 전문가가 함께','산재 예방 정책을 심의하는','위원회가 고용노동부에 생깁니다'],
+ ['둘째','작업중지가 넓어집니다','급박한 위험이 있을 때뿐 아니라','우려되는 경우에도','노동자는 작업을 멈추고','대피할 수 있습니다','하청 노동자는','원청에 직접','작업중지를 요구할 수 있습니다'],
+ ['노동부장관의 작업중지 명령','요건도 넓어집니다','시정조치를 이행하지 않아','급박한 위험이 있으면','시정이 끝날 때까지','작업을 재개할 수 없습니다'],
+ ['셋째','건설 현장','동시에 두 명 이상','사망하는 사고로','삼 년간 영업정지를','두 번 이상 받고도','다시 대상이 되면','사업 등록 말소를','요청할 수 있습니다'],
+ ['폭염과 한파는','공사 기간 연장 사유로','명시되고','산업안전보건관리비','계상 의무는','도급인과 다른 업종까지','확대됩니다'],
+ ['넷째','과징금','안전보건조치 위반으로','일 년에 세 명 이상','사망하면','영업이익의 오 퍼센트 이내','과징금이 부과됩니다'],
+ ['다섯째','법령 위반을 신고한 사람에게','포상금을 지급할','근거가 생깁니다'],
+ ['여섯째','수출 목적으로 수입한 기계도','안전인증을','면제받을 수 있습니다'],
+ ['시행 시기는 항목마다 다릅니다','공포한 날부터 일 년 후까지','차례로 시행되니','작업중지 요구에 대응하는','절차부터 미리','점검해 두시기 바랍니다'],
+ null];
+const TD=.42;
+const TRANS=['zoom','push-left','hazard','push-up','push-left','iris','push-up','push-left','hazard','zoom'];
+let TOTAL=0,CUES=[],SFX=[],PHRASES=[];
+function build(){
+  let acc=0;
+  S.forEach((s,i)=>{s.d=Math.max(s.min||0,s.lead+TIMING.CLIP[i]+s.tail);
+    s.words=TIMING.W[i].map(([w,a,b])=>[w,a+s.lead,b+s.lead]);
+    const find=(p,n)=>{const m=s.words.filter(x=>x[0].startsWith(p));if(!m[n])throw new Error(`word "${p}"#${n} not in scene ${i+1}`);return m[n];};
+    s.e={w:(p,n=0)=>find(p,n)[1],we:(p,n=0)=>find(p,n)[2],end:s.lead+TIMING.CLIP[i]};
+    s.s=acc;acc+=s.d;});
+  TOTAL=acc;CUES=S.map(s=>+(s.s+s.lead).toFixed(3));
+  S.forEach((s,i)=>{(s.sfx?s.sfx(s.e):[]).forEach(([k,t,d])=>SFX.push([k,+(s.s+t).toFixed(3),d||0]));if(i>0)SFX.push(['whoosh',+(s.s-.05).toFixed(3),0]);});
+  S.forEach((s,i)=>{if(!CAPS[i])return;let k=0;
+    CAPS[i].forEach(line=>{const n=line.split(' ').length,ph=s.words.slice(k,k+n).map(([w,a,b])=>[w.replace(/[.,?]$/,''),s.s+a,s.s+b]);
+      if(ph.map(x=>x[0]).join(' ')!==line)console.log('caption mismatch',i+1,line,'|',ph.map(x=>x[0]).join(' '));PHRASES.push(ph);k+=n;});
+    if(k!==s.words.length)console.log('caption words left over in scene',i+1);});
+  window.TOTAL=TOTAL;window.CUES=CUES;window.SFX=SFX;}
+
+function captions(T){
+  let ph=null;for(let i=0;i<PHRASES.length;i++){const p=PHRASES[i],st=p[0][1]-.06,en=Math.min(p[p.length-1][2]+.35,PHRASES[i+1]?PHRASES[i+1][0][1]-.06:1e9);
+    if(T>=st&&T<en){ph=p;break;}}
+  if(!ph)return;const size=50;font(800,size);const sp=16;
+  const ws=ph.map(x=>ctx.measureText(x[0]).width);const tot=ws.reduce((a,b)=>a+b,0)+sp*(ph.length-1);
+  const a=P(T,ph[0][1]-.06,ph[0][1]+.08);const s=lerp(.92,1,eo(a));
+  ctx.save();ctx.translate(W/2,1548);ctx.scale(s,s);ctx.globalAlpha=clamp(a*1.5);
+  ctx.fillStyle='rgba(243,245,248,.96)';rr(-tot/2-34,-48,tot+68,96,48);ctx.fill();
+  let x=-tot/2;ph.forEach(([w,st,en],i)=>{const on=T>=st,cur=T>=st&&T<en+.04;
+    if(cur){ctx.fillStyle=C.yellow;rr(x-8,-34,ws[i]+16,68,12);ctx.fill();}
+    ctx.fillStyle=cur||on?C.ink:'rgba(17,21,28,.38)';ctx.textBaseline='middle';ctx.textAlign='left';ctx.fillText(w,x,3);x+=ws[i]+sp;});
+  ctx.restore();}
+
+const SC=.86;
+function drawScene(i,lt){const s=S[i];ctx.save();
+  const z=1+.03*clamp(lt/s.d);ctx.translate(540,760);ctx.scale(z,z);ctx.translate(-540,-760);
+  ctx.translate(540*(1-SC),90-120*SC);ctx.scale(SC,SC);
+  try{s.f(lt,s.e);}catch(err){console.log('scene',i+1,err.message);}
+  ctx.restore();}
+const toScr=(x,y)=>[540*(1-SC)+x*SC,90-120*SC+y*SC];
+const IRIS={6:toScr(540,1300)};   // into scene 7: from the outcome card of scene 6
+
+function renderFrame(T){
+  let i=S.findIndex(s=>T>=s.s&&T<s.s+s.d);if(i<0)i=S.length-1;const sc=S[i],lt=T-sc.s;
+  ctx=mctx;bg(T);
+  const inTrans=i>0&&lt<TD;
+  if(!inTrans)drawScene(i,lt);
+  else{const k=eio(lt/TD),type=TRANS[i-1],prev=S[i-1],plt=prev.d+lt;
+    for(const [c,idx,tt] of [[actxA,i-1,plt],[actxB,i,lt]]){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);ctx=c;drawScene(idx,tt);}
+    ctx=mctx;
+    if(type==='push-left'){ctx.drawImage(offA,-W*k,0);ctx.drawImage(offB,W*(1-k),0);}
+    else if(type==='push-up'){ctx.drawImage(offA,0,-H*k);ctx.drawImage(offB,0,H*(1-k));}
+    else if(type==='zoom'){ctx.save();ctx.globalAlpha=1-k;ctx.translate(540,800);ctx.scale(1+.35*k,1+.35*k);ctx.translate(-540,-800);ctx.drawImage(offA,0,0);ctx.restore();
+      ctx.save();ctx.globalAlpha=k;ctx.translate(540,800);ctx.scale(.88+.12*k,.88+.12*k);ctx.translate(-540,-800);ctx.drawImage(offB,0,0);ctx.restore();}
+    else if(type==='iris'){ctx.drawImage(offA,0,0);const [cx,cy]=IRIS[i]||[540,800];const R=Math.hypot(Math.max(cx,W-cx),Math.max(cy,H-cy))*k;
+      ctx.save();ctx.beginPath();ctx.arc(cx,cy,R,0,7);ctx.clip();bg(T);ctx.drawImage(offB,0,0);ctx.restore();
+      ctx.save();ctx.strokeStyle=C.yellow;ctx.lineWidth=18*(1-k);ctx.beginPath();ctx.arc(cx,cy,R,0,7);ctx.stroke();ctx.restore();}
+    else if(type==='hazard'){ctx.drawImage(offA,0,0);const ex=lerp(-700,W+700,k);
+      ctx.save();ctx.beginPath();ctx.moveTo(-400,0);ctx.lineTo(ex,0);ctx.lineTo(ex-500,H);ctx.lineTo(-900,H);ctx.closePath();ctx.clip();bg(T);ctx.drawImage(offB,0,0);ctx.restore();
+      ctx.save();ctx.beginPath();ctx.moveTo(ex,0);ctx.lineTo(ex+140,0);ctx.lineTo(ex-360,H);ctx.lineTo(ex-500,H);ctx.closePath();ctx.clip();hazard(-600,0,W+1200,H,0);ctx.restore();}
+  }
+  header(T,sc.item);
+  captions(T);
+  ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(0,0,W,8);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*T/TOTAL,8);
+  const fo=P(T,TOTAL-.6,TOTAL);if(fo>0){ctx.fillStyle=`rgba(0,0,0,${fo})`;ctx.fillRect(0,0,W,H);}
+}
+window.renderFrame=renderFrame;window.FPS=FPS;
+TIMING=window.TIMINGDATA;build();
+window.ready=Promise.resolve().then(()=>Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다')))).then(()=>document.fonts.ready);
+if(!location.search.includes('render')){window.ready.then(()=>{const st=performance.now();(function loop(){renderFrame(((performance.now()-st)/1000)%TOTAL);requestAnimationFrame(loop);})();});}
+</script></body></html>
