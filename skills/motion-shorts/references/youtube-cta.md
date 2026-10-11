@@ -27,8 +27,8 @@ Category 교육, language 한국어; vertical ≤3 min → Shorts; thumbnail = a
 
 ## Subtle CTA inside the video (default: all three)
 Explicit "구독·좋아요" only if the user asks. These work by being useful, not by asking:
-1. **Seamless loop** (`CONFIG.loop`): the last 0.5 s wipes into frame 0, the progress bar returns to 0, BGM uses short fades (`--loop`). Shorts auto-replay; viewers often watch a second time without noticing → watch-through and replays go up.
+1. **Seamless loop** (`CONFIG.loop` + the ending rotation `wave`/`seal`/`tablet`): the last 0.5 s wipes into frame 0 (`tablet`: the camera pushes into the tablet showing frame 0), the progress bar returns to 0, BGM uses short fades (`--loop`). Shorts auto-replay; viewers often watch a second time without noticing → watch-through and replays go up.
 2. **Save chip** on the scene worth revisiting (dates, checklist): `bookmark` + "○○ 확인용으로 저장해 두세요". Reads as a hint, not a request.
-3. **Question card** after the closing line: a concrete question the target viewer can answer from their own workplace ("우리 회사는 작업중지 요구, 누가 어떻게 받나요?"). On screen only, no narration.
+3. **Question card** in the silent ending (`ending(..., {q})`): a concrete question the target viewer can answer from their own workplace ("우리 회사는 작업중지 요구, 누가 어떻게 받나요?"). On screen only, no narration.
 Optional (upload screen): link a related long video; pinned comment above.
 Avoid teasing a "next episode" unless the user actually plans it.

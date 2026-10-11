@@ -25,6 +25,7 @@ const CONFIG={
   items:3,                             // progress chips in the header (0 hides them); scenes set item:1..n or -1
   brand:'상생의 노동법  |  박재우 변호사',
   safeScale:.86,
+  ending:'wave',                       // closing scene: 'wave' | 'seal' | 'tablet' (new_project.py rotates them at random)
   loop:true                            // last 0.5 s wipes back into frame 0 → seamless auto-replay
 };
 const W=1080,H=1920,FPS=30;
@@ -271,6 +272,91 @@ function header(T,item){if(CONFIG.series)txt(CONFIG.series,W/2,104,{w:800,size:2
     ctx.beginPath();ctx.arc(x0+i*gap,150,on?24:19,0,7);ctx.fill();txt(String(i+1),x0+i*gap,161,{w:900,size:on?28:22,color:on||done?C.ink:C.muted,align:'center'});
     if(i<n-1){ctx.fillStyle=done||on?C.yellow+'59':C.fg+'14';ctx.fillRect(x0+i*gap+26,148,gap-52,4);}}}
 
+/* ---------- closing scenes (silent, last scene): S.push(ending(CONFIG.ending,{q:['line 1','line 2']})) ----------
+   'wave'   lawyer waves with an open palm, brand pill, question card; the loop wipe follows
+   'seal'   lawyer pops up and slams the channel seal onto the screen (shake, ink), question card; the loop wipe follows
+   'tablet' the camera pulls back: the video was playing on the lawyer's tablet; question card + brand; the tablet
+            swipes to frame 0 and the camera pushes back in, so the last frame equals the first (no wipe needed)
+   new_project.py picks CONFIG.ending at random, rotating through all three before repeating. */
+const SEAL_RED='#C8372D';
+const BRAND=CONFIG.brand.split('|').map(x=>x.trim()).filter(Boolean);   // ['상생의 노동법','박재우 변호사']
+function brandPill(x,y,p){if(p<=0)return;const dk=CONFIG.theme==='dark';withT(x,y,pop(p),1,()=>{ctx.fillStyle=dk?C.yellow:C.navy;rr(-380,-60,760,120,60);ctx.fill();
+  txt(CONFIG.brand,0,14,{w:900,size:40,color:dk?C.ink:'#fff',align:'center'});});}
+function questionCard(x,y,q,p){if(p<=0)return;withT(x,y,pop(p),1,()=>{panel(-470,-92,940,184,{fill:C.panel,stroke:C.yellowD});commentIcon(-392,-4,1.15,C.yellowD);
+  if(q.length>1){txt(q[0],-320,-14,{w:800,size:42});txt(q[1],-320,46,{w:900,size:42,color:CONFIG.theme==='dark'?C.yellow:C.navy});}
+  else txt(q[0],-320,16,{w:800,size:42});});}
+function sealMark(x,y,p){if(p<=0)return;const k=lerp(1.22,1,eo(clamp(p*2.5)));withT(x,y,k,1,()=>{ctx.rotate(-.07);
+  ctx.strokeStyle=SEAL_RED;ctx.lineWidth=12;rr(-170,-170,340,340,26);ctx.stroke();ctx.lineWidth=4;rr(-147,-147,294,294,16);ctx.stroke();
+  ctx.fillStyle=SEAL_RED;ctx.textAlign='center';ctx.textBaseline='middle';const top=(BRAND[0]||'').split(' ').slice(0,2);
+  font(900,top.length>1?80:96);top.forEach((l,i)=>ctx.fillText(l,0,top.length>1?-84+i*92:-38));
+  ctx.fillRect(-118,62,236,5);font(900,40);ctx.fillText(BRAND[1]||'',0,110);
+  ctx.fillStyle=C.bg;for(let i=0;i<54;i++){const a=Math.sin(i*12.9898)*43758.5453,b=Math.sin(i*78.233)*12345.678,fa=a-Math.floor(a),fb=b-Math.floor(b);
+    ctx.beginPath();ctx.arc(fa*330-165,fb*330-165,1.5+((fa*7)%1)*3.2,0,7);ctx.fill();}});}   // worn-ink speckles
+function inkSplat(x,y,p){if(p<=0)return;ctx.save();ctx.fillStyle=SEAL_RED;const q=eo(clamp(p));
+  for(let i=0;i<14;i++){const ang=i*2.399+.4,d=lerp(170,215+(i%4)*32,q),r=5+(i*7)%11;ctx.beginPath();ctx.arc(x+Math.cos(ang)*d,y+Math.sin(ang)*d,r*lerp(1.4,1,q),0,7);ctx.fill();}
+  ctx.restore();}
+function sealTool(x,y,s,rot=0,a=1){if(a<=0)return;ctx.save();ctx.globalAlpha*=a;ctx.translate(x,y);ctx.rotate(rot);ctx.scale(s,s);   // face bottom at (0,0)
+  ctx.fillStyle=SEAL_RED;rr(-74,-26,148,26,6);ctx.fill();
+  ctx.fillStyle='#8A5A34';rr(-62,-112,124,90,14);ctx.fill();ctx.fillStyle='rgba(0,0,0,.16)';rr(30,-112,32,90,[0,14,14,0]);ctx.fill();
+  ctx.fillStyle='#6E4526';rr(-22,-150,44,44,8);ctx.fill();
+  ctx.fillStyle='#8A5A34';ctx.beginPath();ctx.arc(0,-178,40,0,7);ctx.fill();ctx.fillStyle='rgba(255,255,255,.28)';ctx.beginPath();ctx.arc(-13,-190,12,0,7);ctx.fill();
+  ctx.restore();}
+const ENDINGS={
+  wave:q=>({f(t){
+    const p=P(t,0,.4),r=rise(p,60);ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
+    ctx.fillStyle=C.yellow+'26';ctx.beginPath();ctx.arc(540,820,330+Math.sin(t*1.4)*8,0,7);ctx.fill();
+    lawyer(540,720,1.05,{t,arm:lerp(.2,-2.15,eo(P(t,.1,.6)))+Math.sin(t*3)*.1,cut:300,blink:(t%3)>2.9});
+    ctx.fillStyle=C.line;rr(70,1060,940,40,10);ctx.fill();ctx.restore();
+    brandPill(540,1390,P(t,.3,.7));questionCard(540,1222,q,P(t,1.1,1.45));
+  },sfx:()=>[['rise',0],['pop',.3],['pop',1.1]]}),
+  seal:q=>({f(t){
+    const HIT=1.25,DESK=1000,MX=540,MY=1245;
+    const sh=t>HIT?Math.sin((t-HIT)*72)*28*Math.exp(-(t-HIT)*7):0;   // impact shake
+    ctx.save();ctx.translate(sh,sh*.55);
+    ctx.fillStyle=C.yellow+'26';ctx.beginPath();ctx.arc(540,720,310*eo(P(t,.1,.6))+Math.sin(t*1.4)*8,0,7);ctx.fill();
+    const hy=lerp(1320,600,eb(P(t,.12,.62)));
+    const arm=t<.85?lerp(.2,-2.3,eo(P(t,.45,.85))):t<1?lerp(-2.3,-2.6,eo(P(t,.85,1))):t<1.4?lerp(-2.6,-1.2,eio(P(t,1,1.2))):lerp(-1.2,-2.15,eo(P(t,1.4,1.75)))+Math.sin((t-1.75)*3)*.1*P(t,1.75,2.1);
+    ctx.save();ctx.beginPath();ctx.rect(0,0,W,DESK);ctx.clip();
+    lawyer(540,hy,1,{t,arm,cut:DESK-hy,blink:(t%3)>2.9,nod:nodv(t,HIT+.1)});
+    const palm=a=>[540+118-178*Math.sin(a),hy+150+178*Math.cos(a)];
+    if(t<1){const [px,py]=palm(arm);sealTool(px,py+22,.7);}
+    ctx.restore();
+    ctx.fillStyle=C.line;rr(70,DESK,940,40,10);ctx.fill();
+    inkSplat(MX,MY,P(t,HIT,HIT+.22));sealMark(MX,MY,P(t,HIT,HIT+.15));burst(MX,MY,P(t,HIT,HIT+.4),SEAL_RED,215,300,12);
+    if(t>=1&&t<1.75){const [hx,hy0]=palm(-2.6);   // flying seal → impact → lift away
+      if(t<HIT){const f=Math.pow(P(t,1,HIT),2);sealTool(lerp(hx,MX,f),lerp(hy0+22,MY+170,f),lerp(.7,2.4,f),lerp(.25,0,f));}
+      else{const l=eio(P(t,HIT+.08,1.7));sealTool(MX,MY+170-560*l,2.4+.5*l,0,1-l);}}
+    ctx.restore();
+    questionCard(540,1550,q,P(t,2.3,2.65));
+  },sfx:()=>[['rise',.1],['swoosh',.45],['whoosh',.98],['thud',1.25],['stamp',1.25],['pop',2.3]]}),
+  tablet:q=>({full:true,f(t){   // draws in screen coordinates (no safeScale, no header/captions)
+    const TX=360,TY=790,TW=360,TH=640,CX=TX+TW/2,CY=TY+TH/2,Z=W/TW,dk=CONFIG.theme==='dark';
+    const u=eio(P(t,.25,1.25))*(1-eio(P(t,4.1,4.9)));   // 0 = tablet screen fills the frame, 1 = pulled back
+    const z=Math.pow(Z,1-u),k=(Z-z)/(Z-1);
+    ctx.save();ctx.translate(540,lerp(960,CY,k));ctx.scale(z,z);ctx.translate(-CX,-CY);
+    ctx.fillStyle=C.yellow+'26';ctx.beginPath();ctx.arc(540,760,300+Math.sin(t*1.4)*8,0,7);ctx.fill();
+    questionCard(540,380,q,P(t,1.5,1.85));
+    lawyer(540,610,.85,{t,blink:(t%3)>2.9,nod:nodv(t,1.3)+nodv(t,3.75)});
+    ctx.strokeStyle=C.navy;ctx.lineWidth=56;ctx.lineCap='round';   // arms reaching to the tablet sides
+    [-1,1].forEach(sd=>{ctx.beginPath();ctx.moveTo(540+sd*105,735);ctx.quadraticCurveTo(540+sd*240,850,540+sd*(TW/2+40),1100);ctx.stroke();});
+    ctx.save();ctx.shadowColor='rgba(0,0,0,.28)';ctx.shadowBlur=40;ctx.shadowOffsetY=18;ctx.fillStyle=dk?'#323C4D':'#1E2838';rr(TX-24,TY-24,TW+48,TH+48,40);ctx.fill();ctx.restore();
+    ctx.fillStyle=dk?'#4A5568':'#3A475C';ctx.beginPath();ctx.arc(CX,TY-12,4,0,7);ctx.fill();
+    ctx.save();rr(TX,TY,TW,TH,12*u);ctx.clip();ctx.imageSmoothingQuality='high';
+    const sw=eio(P(t,3.3,3.65));   // swipe up inside the tablet: last frame → frame 0
+    if(sw<1)ctx.drawImage(CAP.last,TX,TY-TH*sw,TW,TH);
+    if(sw>0)ctx.drawImage(CAP.first,TX,TY+TH*(1-sw),TW,TH);
+    ctx.restore();
+    [-1,1].forEach(sd=>{const hx=sd<0?TX-24:TX+TW+24;ctx.fillStyle=C.skin;   // thumbs stay on the bezel so the push-in ends on a clean frame
+      rr(hx+(sd<0?-46:2),1050,44,110,22);ctx.fill();rr(hx+(sd<0?-8:-14),1068,22,52,11);ctx.fill();});
+    const fp=P(t,3.15,3.75);if(fp>0&&fp<1){const fy=lerp(TY+TH*.78,TY+TH*.3,eio(P(t,3.3,3.65)));ctx.save();ctx.globalAlpha=Math.sin(fp*Math.PI)*.85;   // fingertip swipe hint
+      ctx.fillStyle='rgba(255,255,255,.9)';ctx.beginPath();ctx.arc(CX+56,fy,24,0,7);ctx.fill();ctx.strokeStyle='rgba(30,40,56,.35)';ctx.lineWidth=4;ctx.stroke();ctx.restore();}
+    brandPill(540,1545,P(t,1.9,2.25));   // brand below the tablet (caption band, clear of the Shorts UI)
+    ctx.restore();
+  },sfx:()=>[['swoosh',.25],['pop',1.5],['pop',1.9],['tick',3.25],['swoosh',3.3],['whoosh',4.1]]})};
+function ending(kind,{q=['여러분 회사는','어떻게 하고 있나요?'],min=5}={}){const mk=ENDINGS[kind]||ENDINGS.wave;return {item:-1,lead:0,tail:0,min,noCap:true,...mk(q)};}
+let CAP=null;   // full-frame captures for the 'tablet' ending: frame 0 and the frame just before the last scene
+function captureFrames(){const g=T=>{renderFrame(T);const c=new OffscreenCanvas(W,H);c.getContext('2d').drawImage(main,0,0);return c;};CAP={first:g(0),last:g(S[S.length-1].s-1e-3)};}
+
 /* =====================================================================================
    SCENES — one entry per narration clip (same order as script.json).
    f(t,e): t = scene-local seconds. Time every cue to a spoken word:
@@ -279,6 +365,7 @@ function header(T,item){if(CONFIG.series)txt(CONFIG.series,W/2,104,{w:800,size:2
    A missing word throws; the error is printed by render.js (fix the prefix, never guess times).
    Fields: item (header chip, -1 none) · lead (s before narration starts) · tail (s after) ·
            min (minimum scene length) · noCap (hide captions) · sfx(e) → [[kind, t, dur?], ...]
+   Last scene: S.push(ending(CONFIG.ending,{q:[question lines]})) — silent closing, no script line for it.
    The demo below matches assets/demo_script.json — replace it with the real scenes.
    ===================================================================================== */
 const S=[];
@@ -306,18 +393,8 @@ S.push({item:1,lead:.3,tail:.6,f(t,e){
   const q0=e.w('단어에');person(260,1120,.7,{t,mood:'smile',look:.6,talk:flap(t,q0,e.end),nod:nodv(t,e.w('자막이')),blink:(t%3)>2.9,cut:200});
   bubble(700,1100,['말할 때 입이 움직이고','고개를 끄덕여요'],P(t,q0+.2,q0+.6),{size:40,tail:[-260,40]});
 },sfx:e=>[['thud',0],['rise',e.w('단어에')-.2],['check',e.w('화면이')],['check',e.w('자막이')],['pop',e.w('단어에')+.2]]});
-// 3. CTA — waving lawyer, then a question card (comment bait without asking), brand pill; loop handles the end
-S.push({item:-1,lead:.35,tail:1.3,min:6.0,noCap:true,f(t,e){
-  const qT=e.end+.15,p=P(t,0,.4),r=rise(p,60);
-  ctx.save();ctx.globalAlpha=r.a;ctx.translate(0,r.y);
-  ctx.fillStyle=C.yellow+'14';ctx.beginPath();ctx.arc(540,820,330+Math.sin(t*1.4)*8,0,7);ctx.fill();
-  lawyer(540,720,1.05,{t,talk:flap(t,e.w('상생의'),e.end),arm:lerp(.2,-2.15,eo(P(t,.1,.6)))+Math.sin(t*3)*.1,cut:300});
-  ctx.fillStyle=C.panel2;rr(70,1060,940,40,10);ctx.fill();ctx.restore();
-  const qp=P(t,qT,qT+.35);if(qp>0)withT(540,1222,pop(qp),1,()=>{panel(-470,-92,940,184,{fill:C.panel2,stroke:C.yellow+'80'});
-    commentIcon(-392,-4,1.15);txt('여러분 회사는 어떻게 하고 있나요?',-320,16,{w:800,size:40});});
-  const pb=P(t,e.w('상생의')-.1,e.w('상생의')+.35);if(pb>0)withT(540,1390,pop(pb),1,()=>{ctx.fillStyle=C.yellow;rr(-380,-60,760,120,60);ctx.fill();
-    txt(CONFIG.brand,0,14,{w:900,size:40,color:C.ink,align:'center'});});
-},sfx:e=>[['rise',0],['pop',e.w('상생의')-.1],['pop',e.end+.15]]});
+// 3. Closing — silent (no narration line): the built-in ending chosen in CONFIG.ending; keep it the last scene
+S.push(ending(CONFIG.ending,{q:['여러분 회사는','어떻게 하고 있나요?']}));
 
 /* captions: hand-picked line breaks per scene (null = no captions). Each line must equal the next
    transcript words joined by spaces, punctuation dropped; a mismatch is printed by render.js. */
@@ -341,8 +418,8 @@ function build(){
     s.e={w:(p,n=0)=>find(p,n)[1],we:(p,n=0)=>find(p,n)[2],end:s.lead+clip};
     s.s=acc;acc+=s.d;});
   TOTAL=acc;CUES=S.filter((s,i)=>i<TIMING.CLIP.length).map(s=>+(s.s+s.lead).toFixed(3));
-  S.forEach((s,i)=>{(s.sfx?s.sfx(s.e):[]).forEach(([k,t,d])=>SFX.push([k,+(s.s+t).toFixed(3),d||0]));if(i>0)SFX.push(['whoosh',+(s.s-.05).toFixed(3),0]);});
-  if(CONFIG.loop)SFX.push(['whoosh',+(TOTAL-LOOP_TD-.05).toFixed(3),0]);
+  S.forEach((s,i)=>{(s.sfx?s.sfx(s.e):[]).forEach(([k,t,d])=>SFX.push([k,+(s.s+t).toFixed(3),d||0]));if(i>0&&!s.full)SFX.push(['whoosh',+(s.s-.05).toFixed(3),0]);});
+  if(CONFIG.loop&&!S[S.length-1].full)SFX.push(['whoosh',+(TOTAL-LOOP_TD-.05).toFixed(3),0]);
   S.forEach((s,i)=>{if(!CAPS[i])return;let k=0;
     CAPS[i].forEach(line=>{const n=line.split(' ').length,ph=s.words.slice(k,k+n).map(([w,a,b])=>[w.replace(/[.,?]$/,''),s.s+a,s.s+b]);
       if(ph.map(x=>x[0]).join(' ')!==line)console.log('caption mismatch',i+1,line,'|',ph.map(x=>x[0]).join(' '));PHRASES.push(ph);k+=n;});
@@ -372,7 +449,7 @@ function drawScene(i,lt){const s=S[i];ctx.save();
 function renderFrame(T){
   let i=S.findIndex(s=>T>=s.s&&T<s.s+s.d);if(i<0)i=S.length-1;const sc=S[i],lt=T-sc.s;
   ctx=mctx;bg(T);
-  const inTrans=i>0&&lt<TD,loopT=CONFIG.loop?T-(TOTAL-LOOP_TD):-1;
+  const inTrans=i>0&&lt<TD&&!sc.full,loopT=CONFIG.loop&&!S[S.length-1].full?T-(TOTAL-LOOP_TD):-1;   // a full-frame ending loops by itself
   if(loopT>0){ // last moments: wipe back to frame 0 so the auto-replay is seamless
     const k=eio(clamp(loopT/LOOP_TD));
     for(const [c,idx,tt] of [[actxA,i,lt],[actxB,0,0]]){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);ctx=c;drawScene(idx,tt);}
@@ -382,6 +459,7 @@ function renderFrame(T){
     header(0,S[0].item);
     ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(0,0,W,8);ctx.fillStyle=C.yellow;ctx.fillRect(0,0,W*(1-k),8);
     return;}
+  if(sc.full){ctx=mctx;ctx.save();try{sc.f(lt,sc.e);}catch(err){console.log('scene',i+1,err.message);}ctx.restore();return;}   // full-frame scene draws the whole screen itself
   if(!inTrans)drawScene(i,lt);
   else{const k=eio(lt/TD),type=TRANS[i-1],prev=S[i-1],plt=prev.d+lt;
     for(const [c,idx,tt] of [[actxA,i-1,plt],[actxB,i,lt]]){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,W,H);ctx=c;drawScene(idx,tt);}
@@ -404,6 +482,6 @@ function renderFrame(T){
 }
 window.renderFrame=renderFrame;window.FPS=FPS;
 TIMING=window.TIMINGDATA;build();
-window.ready=Promise.resolve().then(()=>Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다')))).then(()=>document.fonts.ready);
+window.ready=Promise.resolve().then(()=>Promise.all(['500','700','800','900'].map(w=>document.fonts.load(`${w} 40px P`,'가나다')))).then(()=>document.fonts.ready).then(()=>{if(S.some(s=>s.full))captureFrames();});
 if(!location.search.includes('render')){window.ready.then(()=>{const st=performance.now();(function loop(){renderFrame(((performance.now()-st)/1000)%TOTAL);requestAnimationFrame(loop);})();});}
 </script></body></html>

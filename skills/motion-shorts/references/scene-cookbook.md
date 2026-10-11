@@ -26,6 +26,7 @@ S.push({item:2, lead:.3, tail:.55, f(t,e){
 - `lead`: seconds before narration starts in the scene (0.25–0.35; give 0.5+ if a big card must settle first).
   `tail`: seconds after narration (0.5–0.6; CTA 1.2+). `min`: minimum scene length (CTA ≈ 6 s so the question card can be read).
 - `item`: which header chip is lit (1..CONFIG.items) or -1.
+- **Closing scene**: always the built-in `S.push(ending(CONFIG.ending,{q:['line 1','line 2']}))` as the last scene (silent, 5 s, `min` overridable). `CONFIG.ending` is `'wave'` | `'seal'` | `'tablet'`, chosen at random by new_project.py (rotating). `tablet` is a `full:true` scene: it draws in screen coordinates, the engine skips header/captions/progress bar, forces a cut into it, captures frame 0 and the previous frame (`CAP.first`/`CAP.last`), and disables the loop wipe because its push-in ends on frame 0.
 - **Silent scenes**: add scenes after the last scripted one (no narration line) for a closing card. They get `CLIP=0`, no words and no captions; give them `min` (≈5 s) and time everything with plain seconds. Used for a closing scene without a spoken sign-off — users preferred not reading the sign-off in Shorts because it signals "the end" and works against the loop.
 - Wrap groups in `ctx.save()/restore()`; never leave globalAlpha or transforms changed.
 
@@ -84,14 +85,14 @@ Make new icons in the same flat style (2–3 colours from `C`, rounded rects, 8�
 
 **Timeline of effective dates** – vertical line filling with progress, nodes popping per date word, the node relevant to the takeaway glows; add the save chip ("시행일 확인용으로 저장해 두세요" + `bookmark`).
 
-**Takeaway / CTA** – lawyer waving with open palm while saying the closing line, brand pill on "상생의", then the question card after narration ends, recap icons fading out first. Loop wipe follows automatically.
+**Takeaway / CTA** – the narration ends on the practical takeaway (checklist + save chip). The closing is the silent built-in `ending()` (wave / seal / tablet); only write the question lines (`q`), a concrete question the viewer can answer about their own workplace.
 
 ## 5. Transitions
 
 `TRANS[i-1]` is the transition into scene i (0.42 s, starts at the boundary). Mix them – one type throughout feels templated.
 - `push-left` (next topic) · `push-up` (continuation / drill-down) · `zoom` (open/close, conclusion) ·
   `iris` (focus on a point: set `IRIS[k]=toScr(x,y)` at the element the previous scene ended on) · `hazard` (dark theme accent wipe)
-The final loop wipe back to frame 0 is automatic when `CONFIG.loop` is true.
+The final loop wipe back to frame 0 is automatic when `CONFIG.loop` is true (skipped for the `tablet` ending, which loops by zooming into frame 0).
 
 ## 6. Captions
 
