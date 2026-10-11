@@ -13,14 +13,14 @@ Write `$W/youtube_meta.md` with these sections so the user can paste field by fi
 3. 챕터: `0:00 …` lines from scene start times (render.js meta → scene starts). YouTube needs the first at 0:00, ≥3 chapters, each ≥10 s — merge short scenes. Chapters may not display on Shorts; harmless to include.
 4. 출처: exact source title/date as printed in the material. Never invent case numbers.
 5. 고지: any disclaimer printed in the source (e.g. "가상 사례입니다") + "이 영상은 일반 정보 제공 목적이며 개별 사안에 대한 법률 자문이 아닙니다." + unknowns (e.g. 공포일 미정).
-6. `상생의 노동법 | 박재우 변호사` (+ contact only if printed in the source).
+6. Signature line, always exactly: `상생의 노동법 | 박재우 변호사 | parkjw@yulchon.com` — the email sits to the right of the name on the same line, with no "문의" label or call to action (the user asked for a plain signature, not a solicitation). Do not add phone numbers or other contacts.
 7. 3–5 hashtags at the very end (first three show above the title).
 
 ## Tags
 15–25 comma-separated, total ≤500 chars: core terms + practical search phrases + broad topics + channel name. Nothing that identifies a private person or company the source anonymised.
 
 ## Pinned comment
-A reusable summary (e.g. effective-date table or checklist) + the same question as the closing card. Pinned summaries get saved and shared.
+A reusable summary (e.g. effective-date table or checklist) + the same question as the closing card. Do not repeat the email there; the description signature carries it. Pinned summaries get saved and shared.
 
 ## Other settings
 Category 교육, language 한국어; vertical ≤3 min → Shorts; thumbnail = a frame with title + character/icon (3–6 s); the cloned voice means the user should decide on the "altered or synthetic content" disclosure — point it out, don't decide for them.

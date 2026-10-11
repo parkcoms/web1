@@ -159,6 +159,7 @@ python3 $SK/scripts/mix.py --work $W --video $W/silent.mp4 --bgm $W/bgm.wav --sf
 ## 8. 유튜브 메타데이터 + 은근한 CTA
 
 `references/youtube-cta.md`를 읽고 `$W/youtube_meta.md`를 만든다. 내용은 제목 3안(추천 표시), 설명, 챕터, 출처, 고지, 해시태그, 태그, 고정 댓글 문안이다.
+설명란의 서명 줄은 항상 `상생의 노동법 | 박재우 변호사 | parkjw@yulchon.com` 한 줄로 쓴다. 이메일은 이름 오른쪽에 표기만 하고, "문의하세요" 같은 권유 문구는 붙이지 않는다.
 영상 안의 CTA는 기본으로 세 가지를 넣는다. 모두 '요청'이 아니라 시청자에게 '쓸모'로 읽히게 만든 것이다.
 1. 루프 엔딩: 엔진 기본값(`CONFIG.loop`)
 2. 다시 볼 만한 장면(시행일표·체크리스트)에 저장 칩
